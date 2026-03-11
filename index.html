@@ -1,89 +1,945 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to Firebase Hosting</title>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Course Scheduler — Lincoln Middle School</title>
 
-    <!-- update the version number as needed -->
-    <script defer src="/__/firebase/12.10.0/firebase-app-compat.js"></script>
-    <!-- include only the Firebase features as you need -->
-    <script defer src="/__/firebase/12.10.0/firebase-auth-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-database-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-firestore-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-functions-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-messaging-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-storage-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-analytics-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-remote-config-compat.js"></script>
-    <script defer src="/__/firebase/12.10.0/firebase-performance-compat.js"></script>
-    <!-- 
-      initialize the SDK after all desired features are loaded, set useEmulator to false
-      to avoid connecting the SDK to running emulators.
-    -->
-    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
+  <!-- React 18 -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 
-    <style media="screen">
-      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
-      #message h2 { color: #ffa100; font-weight: bold; font-size: 16px; margin: 0 0 8px; }
-      #message h1 { font-size: 22px; font-weight: 300; color: rgba(0,0,0,0.6); margin: 0 0 16px;}
-      #message p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
-      #message a { display: block; text-align: center; background: #039be5; text-transform: uppercase; text-decoration: none; color: white; padding: 16px; border-radius: 4px; }
-      #message, #message a { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
-      #load { color: rgba(0,0,0,0.4); text-align: center; font-size: 13px; }
-      @media (max-width: 600px) {
-        body, #message { margin-top: 0; background: white; box-shadow: none; }
-        body { border-top: 16px solid #ffa100; }
+  <!-- SheetJS (XLSX parser) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- Babel standalone (JSX transpiler) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { font-family: 'Palatino Linotype', Palatino, 'Book Antiqua', serif; background: #f4f6f9; }
+    button { font-family: inherit; }
+    input  { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // ── Destructure React hooks from global ──────────────────────────────────
+    const { useState, useMemo, useCallback } = React;
+
+    // ── XLSX is loaded globally by SheetJS CDN script ────────────────────────
+
+
+// ── CONSTANTS ────────────────────────────────────────────────────────────────
+
+const ALL_PERIODS = ["1A","1B","2A","2B","3A","3B","4A","4B","5A","5B","6A","6B"];
+const CORE_CATEGORIES_7 = ["ELA 7", "Math 7", "Science 7"];
+const CORE_CATEGORIES_8 = ["ELA 8", "Math 8", "Science 8"];
+
+// Category overrides for classes that appear in the wrong spreadsheet row
+const CATEGORY_OVERRIDES = {
+  "stuco":   "Stuco",
+  "culture": "German Culture",
+};
+
+// ── CLASS TYPE SYSTEM ─────────────────────────────────────────────────────────
+//
+// TYPE 1 — CORE (every day, full year)
+//   ELA, Math, Science, German 1/2/3 (DLI only)
+//   → Locks BOTH A and B of that period number, BOTH semesters
+//   → Auto-selects paired A/B when you click either
+//
+// TYPE 2 — REQUIRED ONE-SEMESTER (one day only, one semester)
+//   Utah History, Health, Digital Lit, German Culture
+//   → Locks only the specific period clicked (e.g. 2A), leaves 2B free
+//   → One semester only, does NOT carry to S2
+//
+// TYPE 3 — REQUIRED ALL-YEAR (one day only, full year)
+//   CCA, US History
+//   → Locks only the specific period clicked (e.g. 3B), leaves 3A free
+//   → Carries to S2 (same period locked both semesters)
+//
+// TYPE 4 — ELECTIVE (one day only, one semester)
+//   Everything else
+//   → Same as Type 2 mechanically
+
+function getClassType(cls, germanDLI) {
+  const n = cls.name.toLowerCase();
+  const cat = cls.category.toLowerCase();
+
+  // Type 1: Core — locks both A+B, full year
+  if (CORE_CATEGORIES_7.includes(cls.category)) return "core";
+  if (CORE_CATEGORIES_8.includes(cls.category)) return "core";
+  if (germanDLI && n.match(/^german\s*[123]/)) return "core";
+
+  // Type 3: Required all-year — one day, full year
+  if (n.includes("cca") && !n.includes("digital")) return "req-year";
+  if (n.includes("us history")) return "req-year";
+
+  // Type 2: Required one-semester — one day, one semester
+  if (n.includes("utah")) return "req-sem";
+  if (/health\s*[123]?$/.test(n)) return "req-sem";
+  if (n.includes("digital lit")) return "req-sem";
+  if (cat.includes("german culture")) return "req-sem";
+
+  // Type 5: Elective full-year — one day, both semesters (pre-selected in S2, freely replaceable)
+  if (n.includes("stuco"))       return "elective-year";
+  if (n.includes("math lab"))    return "elective-year";
+  if (n.includes("aca ach") || n.includes("academic ach")) return "elective-year";
+  if (n.includes("reading"))     return "elective-year";
+  if (cat.includes("music") || n.includes("music") || n.includes("choir") || n.includes("band") || n.includes("orchestra")) return "elective-year";
+  if (n.includes("study skills")) return "elective-year";
+  // Also catch by category
+  if (cat.includes("aca ach") || cat.includes("stuco") || cat.includes("music")) return "elective-year";
+
+  // Type 4: Elective — one day, one semester
+  return "elective";
+}
+
+// Does this class lock BOTH A and B days?
+function locksAB(classType) { return classType === "core"; }
+
+// Does this class carry into S2 as a pre-selection?
+// core, req-year, elective-year all pre-populate S2 (but all can be freely changed)
+function isFullYear(classType) { return classType === "core" || classType === "req-year" || classType === "elective-year"; }
+
+// Is this a German class that requires DLI to be checked?
+function isGermanClass(cls) {
+  const n = cls.name.toLowerCase();
+  const cat = cls.category.toLowerCase();
+  return cat.includes("german") || !!n.match(/^german\s*[123]/);
+}
+
+// Strip trailing number: "Yearbook 1" → "yearbook", "Health 2" → "health"
+function getNameFamily(name) {
+  return name.toLowerCase().replace(/\s*[123456]$/, "").trim();
+}
+
+function getPeriodNumber(period) { return period[0]; }
+function getPairedPeriod(period) { return period.endsWith("A") ? period.replace("A","B") : period.replace("B","A"); }
+
+// ── EXCEL PARSER ─────────────────────────────────────────────────────────────
+
+function parseScheduleFromWorkbook(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+  const headerRow = raw[0] || [];
+  const periodCols = [];
+  for (let i = 1; i < headerRow.length; i += 3) {
+    if (headerRow[i] != null) periodCols.push({ period: String(headerRow[i]), colIdx: i });
+  }
+
+  const classes = [];
+  let currentCategory = null;
+
+  for (let rowIdx = 1; rowIdx < raw.length; rowIdx++) {
+    const row = raw[rowIdx];
+    if (!row || row.every(c => c === null)) continue;
+    if (row[0] != null) currentCategory = String(row[0]).replace(/\n/g," ").trim();
+    if (!currentCategory) continue;
+
+    for (const { period, colIdx } of periodCols) {
+      const className = row[colIdx];
+      const gr7 = parseFloat(row[colIdx+1]) || 0;
+      const gr8 = parseFloat(row[colIdx+2]) || 0;
+      const nameStr = String(className ?? "").trim();
+      if (!className || !nameStr || nameStr.toUpperCase()==="PREP" || nameStr==="?" || !isNaN(Number(nameStr))) continue;
+
+      let effectiveCategory = currentCategory;
+      for (const [match, override] of Object.entries(CATEGORY_OVERRIDES)) {
+        if (nameStr.toLowerCase().includes(match)) { effectiveCategory = override; break; }
       }
-    </style>
-  </head>
-  <body>
-    <div id="message">
-      <h2>Welcome</h2>
-      <h1>Firebase Hosting Setup Complete</h1>
-      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to go build something extraordinary!</p>
-      <a target="_blank" href="https://firebase.google.com/docs/hosting/">Open Hosting Documentation</a>
-    </div>
-    <p id="load">Firebase SDK Loading&hellip;</p>
 
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const loadEl = document.querySelector('#load');
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-        // // The Firebase SDK is initialized and available here!
-        //
-        // firebase.auth().onAuthStateChanged(user => { });
-        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
-        // firebase.firestore().doc('/foo/bar').get().then(() => { });
-        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
-        // firebase.messaging().requestPermission().then(() => { });
-        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
-        // firebase.analytics(); // call to activate
-        // firebase.analytics().logEvent('tutorial_completed');
-        // firebase.performance(); // call to activate
-        //
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+      // classType is computed at runtime (depends on germanDLI), so store category+name only
+      classes.push({ id: classes.length, category: effectiveCategory, name: nameStr, period, gr7, gr8 });
+    }
+  }
+  return classes;
+}
 
-        try {
-          let app = firebase.app();
-          let features = [
-            'auth', 
-            'database', 
-            'firestore',
-            'functions',
-            'messaging', 
-            'storage', 
-            'analytics', 
-            'remoteConfig',
-            'performance',
-          ].filter(feature => typeof app[feature] === 'function');
-          loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
-        } catch (e) {
-          console.error(e);
-          loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
+// ── COLORS ───────────────────────────────────────────────────────────────────
+const CAT_COLORS = {
+  "ELA 7":"#2563eb","ELA 8":"#2563eb",
+  "Math 7":"#d97706","Math 8":"#d97706",
+  "Science 7":"#16a34a","Science 8":"#16a34a",
+  "History":"#7c3aed",
+  "German":"#dc2626","German Culture":"#dc2626",
+  "Spanish/PLT":"#db2777","Art":"#ec4899",
+  "Foods/Sewing":"#f59e0b","CCA/Digital Lit":"#0891b2",
+  "Health/PE":"#0284c7","Music":"#9333ea",
+  "Theater":"#14b8a6","Photo/Yearbook":"#ea580c",
+  "Lego/Code/Broad":"#334155",
+  "Aca Ach":"#64748b","Stuco":"#64748b","Intervention":"#64748b",
+};
+function catColor(cat) {
+  for (const [k,v] of Object.entries(CAT_COLORS)) {
+    if (cat && cat.toLowerCase().includes(k.toLowerCase())) return v;
+  }
+  return "#6b7280";
+}
+
+// ── REQUIREMENTS ─────────────────────────────────────────────────────────────
+
+function getRequirements(grade, germanDLI) {
+  const reqs = [];
+  // Core: need an A and a B in same period number
+  const coreCats = grade === 7 ? CORE_CATEGORIES_7 : CORE_CATEGORIES_8;
+  for (const cat of coreCats) reqs.push({ id:cat, label:cat, type:"core", category:cat });
+  if (germanDLI) {
+    reqs.push({ id:"German", label:"German 1/2/3 (full year, every day)", type:"core",
+      matchFn: n => !!n.toLowerCase().match(/^german\s*[123]/) });
+  }
+  // Required all-year (one day, both semesters): satisfied by a single period selection that persists
+  if (grade === 7) {
+    reqs.push({ id:"CCA", label:"CCA (full year, one day)", type:"req-year",
+      matchFn: n => n.toLowerCase().includes("cca") && !n.toLowerCase().includes("digital") });
+  }
+  if (grade === 8) {
+    reqs.push({ id:"US History", label:"US History (full year, one day)", type:"req-year",
+      matchFn: n => n.toLowerCase().includes("us history") });
+  }
+  // Required one-semester (one day, one semester)
+  if (grade === 7) {
+    reqs.push({ id:"Utah History", label:"Utah History (1 semester)", type:"req-sem",
+      matchFn: n => n.toLowerCase().includes("utah") });
+  }
+  if (grade === 8) {
+    reqs.push({ id:"Health", label:"Health (1 semester)", type:"req-sem",
+      matchFn: n => /health\s*[123]?$/i.test(n.trim()) });
+    reqs.push({ id:"Digital Lit", label:"Digital Literacy (1 semester)", type:"req-sem",
+      matchFn: n => n.toLowerCase().includes("digital lit") });
+  }
+  if (germanDLI) {
+    reqs.push({ id:"German Culture", label:"German Culture (1 semester)", type:"req-sem",
+      matchFn: n => n.toLowerCase().includes("culture") });
+  }
+  return reqs;
+}
+
+function evalRequirements(reqs, s1Ids, s2Ids, schedule, germanDLI) {
+  const s1Classes = [...s1Ids].map(id => schedule[id]).filter(Boolean);
+  const s2Classes = [...s2Ids].map(id => schedule[id]).filter(Boolean);
+  const allClasses = [...s1Classes, ...s2Classes];
+
+  return reqs.map(req => {
+    if (req.type === "core") {
+      // Need an A and a B in same period number, from same category (or matchFn)
+      const matches = req.category
+        ? allClasses.filter(c => c.category === req.category)
+        : allClasses.filter(c => req.matchFn(c.name));
+      const aNums = matches.filter(c => c.period.endsWith("A")).map(c => getPeriodNumber(c.period));
+      const bNums = matches.filter(c => c.period.endsWith("B")).map(c => getPeriodNumber(c.period));
+      const paired = aNums.filter(n => bNums.includes(n));
+      if (paired.length > 0) return { ...req, status:"met", note:`Period ${paired[0]}A & ${paired[0]}B` };
+      if (matches.length > 0) return { ...req, status:"partial", note:`Have ${matches.map(c=>c.period).join(", ")} — need A+B pair` };
+      return { ...req, status:"missing", note:null };
+    }
+
+    if (req.type === "req-year") {
+      // Satisfied if the class appears in either semester (it persists to both)
+      const match = allClasses.find(c => req.matchFn(c.name));
+      if (match) return { ...req, status:"met", note:`P${match.period} (full year)` };
+      return { ...req, status:"missing", note:null };
+    }
+
+    if (req.type === "req-sem") {
+      const s1Match = s1Classes.find(c => req.matchFn(c.name));
+      const s2Match = s2Classes.find(c => req.matchFn(c.name));
+      if (s1Match || s2Match) {
+        const where = [s1Match && `S1·P${s1Match.period}`, s2Match && `S2·P${s2Match.period}`].filter(Boolean).join(", ");
+        // Health + Digital Lit ideal pairing
+        if (req.id === "Health" || req.id === "Digital Lit") {
+          const h = allClasses.find(c => /health\s*[123]?$/i.test(c.name.trim()));
+          const d = allClasses.find(c => c.name.toLowerCase().includes("digital lit"));
+          if (h && d && getPeriodNumber(h.period) === getPeriodNumber(d.period))
+            return { ...req, status:"met", note:`${where} (ideal pairing ✓)` };
         }
+        return { ...req, status:"met", note:where };
+      }
+      return { ...req, status:"missing", note:null };
+    }
+
+    return { ...req, status:"unknown" };
+  });
+}
+
+// ── MAIN COMPONENT ────────────────────────────────────────────────────────────
+function Scheduler() {
+  const [schedule, setSchedule] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [grade, setGrade] = useState(7);
+  const [germanDLI, setGermanDLI] = useState(false);
+  const [studentName, setStudentName] = useState("");
+  const [s1Ids, setS1Ids] = useState(new Set());
+  const [s2Ids, setS2Ids] = useState(new Set());
+  const [s2Touched, setS2Touched] = useState(false);
+  const [activeSemester, setActiveSemester] = useState(1);
+  const [filterCat, setFilterCat] = useState("All");
+  const [hoveredId, setHoveredId] = useState(null);
+
+  const handleFile = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type:"array" });
+        const parsed = parseScheduleFromWorkbook(wb);
+        if (!parsed.length) { setLoadError("No class data found."); return; }
+        setSchedule(parsed); setLoadError(null); setS1Ids(new Set()); setS2Ids(new Set()); setS2Touched(false);
+      } catch(err) { setLoadError("Could not parse file: " + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  }, []);
+
+  const requirements = useMemo(() => getRequirements(grade, germanDLI), [grade, germanDLI]);
+
+  // Annotate each class with its type (depends on germanDLI)
+  const annotated = useMemo(() => {
+    if (!schedule) return [];
+    return schedule.map(cls => ({ ...cls, classType: getClassType(cls, germanDLI) }));
+  }, [schedule, germanDLI]);
+
+  // Index by id for fast lookup
+  const byId = useMemo(() => {
+    const map = {};
+    for (const cls of annotated) map[cls.id] = cls;
+    return map;
+  }, [annotated]);
+
+  // ── S2 PRE-SELECTION ──────────────────────────────────────────────────────
+  // Full-year classes (Type 1, 3, 5) selected in S1 pre-populate S2.
+  // s2Touched tracks whether the counselor has made any manual changes to S2.
+  // Until touched, effectiveS2Ids = s2PreselectedIds. After any edit, s2Ids is the truth.
+
+  const s2PreselectedIds = useMemo(() => {
+    const ids = new Set();
+    for (const id of s1Ids) {
+      const cls = byId[id];
+      if (cls && isFullYear(cls.classType)) ids.add(id);
+    }
+    return ids;
+  }, [s1Ids, byId]);
+
+  const effectiveS2Ids = useMemo(() => {
+    if (!s2Touched) return s2PreselectedIds;
+    return s2Ids;
+  }, [s2Touched, s2Ids, s2PreselectedIds]);
+
+  const activeIds = activeSemester === 1 ? s1Ids : effectiveS2Ids;
+  const setActiveIds = activeSemester === 1 ? setS1Ids : setS2Ids;
+
+  // Periods blocked by selections within the ACTIVE semester
+  const activeLockedPeriods = useMemo(() => {
+    const locked = new Set();
+    for (const id of activeIds) {
+      const cls = byId[id];
+      if (!cls) continue;
+      if (locksAB(cls.classType)) {
+        const n = getPeriodNumber(cls.period);
+        locked.add(n+"A"); locked.add(n+"B");
+      } else {
+        locked.add(cls.period);
+      }
+    }
+    return locked;
+  }, [activeIds, byId]);
+
+  // Name families taken across both semesters (prevents duplicate elective families)
+  const takenFamilies = useMemo(() => {
+    const fams = new Set();
+    for (const id of new Set([...s1Ids, ...effectiveS2Ids])) {
+      const cls = byId[id];
+      if (cls) fams.add(getNameFamily(cls.name));
+    }
+    return fams;
+  }, [s1Ids, effectiveS2Ids, byId]);
+
+  // Core categories filled in ACTIVE semester (prevents picking two ELA options)
+  const activeFilledCoreCategories = useMemo(() => {
+    const cats = new Set();
+    for (const id of activeIds) {
+      const cls = byId[id];
+      if (cls && locksAB(cls.classType)) cats.add(cls.category);
+    }
+    return cats;
+  }, [activeIds, byId]);
+
+  // Find the auto-pair for a core class (same category, same period number, opposite A/B)
+  function findCorePair(cls) {
+    if (!locksAB(cls.classType)) return null;
+    const pairedPeriod = getPairedPeriod(cls.period);
+    // For German (matched by name not category), match by name family
+    if (cls.category === "German" || cls.classType === "core") {
+      return annotated.find(c =>
+        c.category === cls.category &&
+        c.period === pairedPeriod &&
+        getNameFamily(c.name) === getNameFamily(cls.name)
+      ) || null;
+    }
+    return null;
+  }
+
+  // Visibility
+  function isVisible(cls) {
+    if (isGermanClass(cls) && !germanDLI) return false;
+    return true;
+  }
+
+  // ── STATUS ────────────────────────────────────────────────────────────────
+  function getStatus(cls) {
+    if (!isVisible(cls)) return "hidden";
+    const seatKey = grade === 7 ? "gr7" : "gr8";
+    if (cls[seatKey] === 0) return "grade-na";
+
+    const otherIds = activeSemester === 1 ? effectiveS2Ids : s1Ids;
+
+    // Pre-selected in S2 from S1 full-year classes (not yet manually confirmed)
+    if (activeSemester === 2 && !s2Touched && s2PreselectedIds.has(cls.id)) return "preselected";
+    // Selected in active semester
+    if (activeIds.has(cls.id)) return "selected";
+    // Selected in other semester
+    if (otherIds.has(cls.id)) return "other-sem";
+
+    // Core category already assigned this semester
+    if (locksAB(cls.classType) && activeFilledCoreCategories.has(cls.category)) return "category-taken";
+
+    // Name-family conflict (prevent Yearbook 1 + Yearbook 2 etc.)
+    const family = getNameFamily(cls.name);
+    if (takenFamilies.has(family)) return "family-taken";
+
+    // Period blocked by active semester selections
+    if (locksAB(cls.classType)) {
+      // Core: blocked if either A or B of this period number is taken
+      const n = getPeriodNumber(cls.period);
+      if (activeLockedPeriods.has(n+"A") || activeLockedPeriods.has(n+"B")) return "blocked";
+    } else {
+      // Non-core: blocked only if this exact period is taken
+      if (activeLockedPeriods.has(cls.period)) return "blocked";
+    }
+
+    return "available";
+  }
+
+  // ── TOGGLE ────────────────────────────────────────────────────────────────
+  function toggleClass(cls) {
+    const status = getStatus(cls);
+    if (["blocked","grade-na","hidden","other-sem","category-taken","family-taken"].includes(status)) return;
+
+    // On first edit in S2, initialize from preselected set
+    if (activeSemester === 2 && !s2Touched) {
+      setS2Touched(true);
+      // Initialize s2Ids from the preselected set before modifying
+      const initialized = new Set(s2PreselectedIds);
+      const pair = findCorePair(cls);
+      if (initialized.has(cls.id)) {
+        initialized.delete(cls.id);
+        if (pair) initialized.delete(pair.id);
+      } else {
+        if (locksAB(cls.classType)) {
+          for (const id of [...initialized]) {
+            const existing = byId[id];
+            if (existing && existing.category === cls.category) initialized.delete(id);
+          }
+        }
+        const fam = getNameFamily(cls.name);
+        if (!locksAB(cls.classType)) {
+          for (const id of [...initialized]) {
+            const existing = byId[id];
+            if (existing && getNameFamily(existing.name) === fam) initialized.delete(id);
+          }
+        }
+        initialized.add(cls.id);
+        if (pair) {
+          const n = getPeriodNumber(pair.period);
+          const pairBlocked = [...initialized].some(id => {
+            const other = byId[id];
+            if (!other || other.id === cls.id) return false;
+            if (locksAB(other.classType)) return getPeriodNumber(other.period) === n;
+            return other.period === pair.period;
+          });
+          if (!pairBlocked) initialized.add(pair.id);
+        }
+      }
+      setS2Ids(initialized);
+      return;
+    }
+
+    const next = new Set(activeIds);
+    const pair = findCorePair(cls);
+
+    if (status === "selected") {
+      next.delete(cls.id);
+      if (pair) next.delete(pair.id);
+    } else {
+      // Remove any existing same-category core selections (switching period)
+      if (locksAB(cls.classType)) {
+        for (const id of [...next]) {
+          const existing = byId[id];
+          if (existing && existing.category === cls.category) next.delete(id);
+        }
+      }
+      // Remove same-family duplicate (shouldn't normally reach here, but safety)
+      if (!locksAB(cls.classType)) {
+        const fam = getNameFamily(cls.name);
+        for (const id of [...next]) {
+          const existing = byId[id];
+          if (existing && getNameFamily(existing.name) === fam) next.delete(id);
+        }
+      }
+      next.add(cls.id);
+      // Auto-add pair for core classes
+      if (pair) {
+        // Only add pair if its period isn't already blocked by something else
+        const n = getPeriodNumber(pair.period);
+        const pairBlocked = [...next].some(id => {
+          const other = byId[id];
+          if (!other || other.id === cls.id) return false;
+          if (locksAB(other.classType)) return getPeriodNumber(other.period) === n;
+          return other.period === pair.period;
+        });
+        if (!pairBlocked) next.add(pair.id);
+      }
+    }
+    setActiveIds(next);
+  }
+
+  function changeGrade(g) {
+    setGrade(g); setS1Ids(new Set()); setS2Ids(new Set()); setS2Touched(false); setFilterCat("All");
+  }
+
+  const reqResults = useMemo(() =>
+    schedule ? evalRequirements(requirements, s1Ids, effectiveS2Ids, annotated.reduce((m,c)=>{m[c.id]=c;return m;},{}), germanDLI) : [],
+    [requirements, s1Ids, effectiveS2Ids, annotated, germanDLI]
+  );
+
+  const s1Classes = [...s1Ids].map(id => byId[id]).filter(Boolean);
+  const s2Classes = [...effectiveS2Ids].map(id => byId[id]).filter(Boolean);
+
+  const s2Needs = useMemo(() => {
+    if (!schedule) return [];
+    return requirements
+      .filter(req => req.type === "req-sem" && !s1Classes.some(c => req.matchFn(c.name)))
+      .map(r => r.label);
+  }, [requirements, s1Classes, schedule]);
+
+  const stillAvailable = annotated.filter(c => isVisible(c) && getStatus(c) === "available");
+
+  const categories = annotated.length
+    ? ["All", ...Array.from(new Set(annotated.filter(c => isVisible(c)).map(c => c.category)))]
+    : ["All"];
+
+  const grouped = {};
+  for (const cls of annotated) {
+    if (!isVisible(cls)) continue;
+    if (filterCat !== "All" && cls.category !== filterCat) continue;
+    if (!grouped[cls.category]) grouped[cls.category] = {};
+    grouped[cls.category][cls.period] = cls;
+  }
+
+  const metCount = reqResults.filter(r => r.status === "met").length;
+  const totalReqs = reqResults.length;
+
+  // Type badge for summary panel
+  function typeBadge(cls) {
+    const t = cls.classType;
+    if (t === "core")          return { label:"Core · Every day",       color:"#2563eb" };
+    if (t === "req-year")      return { label:"Req · Full year",         color:"#7c3aed" };
+    if (t === "req-sem")       return { label:"Req · 1 semester",        color:"#d97706" };
+    if (t === "elective-year") return { label:"Elective · Full year",    color:"#0891b2" };
+    return                            { label:"Elective · 1 semester",   color:"#6b7280" };
+  }
+
+
+  // ── RENDER ────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ fontFamily:"'Palatino Linotype',Palatino,'Book Antiqua',serif", minHeight:"100vh", background:"#f4f6f9", color:"#1e2a3a" }}>
+
+      {/* TOP BAR */}
+      <div style={{ background:"#fff", borderBottom:"1px solid #dde3ec", padding:"11px 24px", display:"flex", alignItems:"center", gap:14, flexWrap:"wrap", boxShadow:"0 1px 4px rgba(0,0,0,0.05)" }}>
+        <div>
+          <div style={{ fontSize:17, fontWeight:"bold", color:"#1e3a5f" }}>Course Scheduler</div>
+          <div style={{ fontSize:10, color:"#8a9aaa" }}>Lincoln Middle School · v6</div>
+        </div>
+        <div style={{ flex:1 }} />
+
+        <label style={{ cursor:"pointer", padding:"5px 12px", borderRadius:6, border:"1px dashed #4a90d9", background:"#f0f7ff", fontSize:11, color:"#1e5fa0", display:"flex", alignItems:"center", gap:6 }}>
+          📂 {schedule ? "Reload" : "Load Schedule (.xlsx)"}
+          <input type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display:"none" }} />
+        </label>
+
+        {schedule && <>
+          <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"1px solid #c0d0e0" }}>
+            {[7,8].map(g => (
+              <button key={g} onClick={() => changeGrade(g)}
+                style={{ padding:"5px 16px", background:grade===g?"#1e3a5f":"#f8fafc", color:grade===g?"white":"#5a7a9a", border:"none", cursor:"pointer", fontWeight:"bold", fontSize:12 }}>
+                Grade {g}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display:"flex", borderRadius:6, overflow:"hidden", border:"2px solid #4a90d9" }}>
+            {[1,2].map(s => (
+              <button key={s} onClick={() => setActiveSemester(s)}
+                style={{ padding:"5px 18px", background:activeSemester===s?"#4a90d9":"#f0f7ff", color:activeSemester===s?"white":"#1e5fa0", border:"none", cursor:"pointer", fontSize:12, fontWeight:"bold" }}>
+                Semester {s}
+              </button>
+            ))}
+          </div>
+
+          <label style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#5a7a9a", cursor:"pointer" }}>
+            <input type="checkbox" checked={germanDLI} onChange={e => { setGermanDLI(e.target.checked); setS1Ids(new Set()); setS2Ids(new Set()); setS2Touched(false); }} style={{ accentColor:"#dc2626" }} />
+            German DLI
+          </label>
+
+          <input placeholder="Student name" value={studentName} onChange={e => setStudentName(e.target.value)}
+            style={{ padding:"5px 10px", borderRadius:6, border:"1px solid #c0d0e0", background:"#f8fafc", color:"#1e2a3a", fontSize:12, width:160 }} />
+        </>}
+      </div>
+
+      {loadError && <div style={{ background:"#fff0f0", color:"#b91c1c", padding:"8px 24px", fontSize:12, borderBottom:"1px solid #fecaca" }}>⚠ {loadError}</div>}
+
+      {/* S2 banner */}
+      {schedule && activeSemester === 2 && (
+        <div style={{ background:"#fffbeb", borderBottom:"1px solid #fde68a", padding:"7px 24px", fontSize:11, color:"#92400e", display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
+          <span>↩ <strong>Full-year classes from S1</strong> are pre-selected here. You can freely change, drop, or replace any of them.</span>
+          {s2Needs.length > 0 && <span style={{ color:"#dc2626" }}>· Still needed in S2: <strong>{s2Needs.join(", ")}</strong></span>}
+          {s2Needs.length === 0 && s1Classes.length > 0 && <span style={{ color:"#16a34a" }}>· All semester requirements covered ✓</span>}
+        </div>
+      )}
+
+      {!schedule && !loadError && (
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"70vh", gap:18 }}>
+          <div style={{ fontSize:44 }}>📅</div>
+          <div style={{ fontSize:20, color:"#1e3a5f" }}>Load your master schedule to begin</div>
+          <div style={{ fontSize:12, color:"#8a9aaa", maxWidth:400, textAlign:"center" }}>Upload your Excel file — read fresh each time so schedule changes are always reflected.</div>
+          <label style={{ cursor:"pointer", padding:"10px 24px", borderRadius:8, border:"2px solid #4a90d9", background:"#f0f7ff", fontSize:13, color:"#1e5fa0" }}>
+            📂 Choose Excel File
+            <input type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display:"none" }} />
+          </label>
+        </div>
+      )}
+
+      {schedule && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 290px", minHeight:"calc(100vh - 58px)" }}>
+
+          {/* LEFT */}
+          <div style={{ padding:"14px 14px 14px 22px", overflowX:"auto", overflowY:"auto" }}>
+
+            {/* Filter pills */}
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:12 }}>
+              {categories.map(cat => {
+                const color = catColor(cat);
+                const active = filterCat === cat;
+                return (
+                  <button key={cat} onClick={() => setFilterCat(cat)}
+                    style={{ padding:"2px 9px", borderRadius:20, border:`1.5px solid ${active?color:"#d0dae6"}`, background:active?color:"white", color:active?"white":"#5a7a9a", cursor:"pointer", fontSize:10, fontWeight:600 }}>
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Period headers */}
+            <div style={{ display:"grid", gridTemplateColumns:"150px repeat(12, minmax(62px,1fr))", gap:2, marginBottom:4 }}>
+              <div />
+              {ALL_PERIODS.map(p => {
+                const takenActive = activeLockedPeriods.has(p);
+                const s1carry = false; // no hard S2 locks — all pre-selections are editable
+                const isA = p.endsWith("A");
+                return (
+                  <div key={p} style={{ textAlign:"center", padding:"4px 1px", borderRadius:3,
+                    background: takenActive?"#fee2e2":s1carry?"#fef3c7":isA?"#eff6ff":"#f0f9ff",
+                    border:`1px solid ${takenActive?"#fca5a5":s1carry?"#fcd34d":isA?"#bfdbfe":"#bae6fd"}`,
+                    fontSize:10, fontWeight:"bold",
+                    color: takenActive?"#dc2626":s1carry?"#92400e":isA?"#1d4ed8":"#0369a1" }}>
+                    <div>P{getPeriodNumber(p)}{isA?"A":"B"}</div>
+                    {s1carry && <div style={{ fontSize:8 }}>S1🔒</div>}
+                    {takenActive && <div style={{ fontSize:8 }}>✗</div>}
+                    {!takenActive && !s1carry && <div style={{ fontSize:8, opacity:0.4 }}>✓</div>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Class rows */}
+            {Object.entries(grouped).map(([cat, byPeriod]) => {
+              const color = catColor(cat);
+              const isCoreRow = CORE_CATEGORIES_7.includes(cat)||CORE_CATEGORIES_8.includes(cat);
+              const isGermanRow = cat.toLowerCase().includes("german") && !cat.toLowerCase().includes("culture");
+              return (
+                <div key={cat} style={{ display:"grid", gridTemplateColumns:"150px repeat(12, minmax(62px,1fr))", gap:2, marginBottom:2, alignItems:"stretch" }}>
+                  <div style={{ display:"flex", alignItems:"center", paddingRight:7, borderRight:`3px solid ${color}`, minHeight:54 }}>
+                    <div>
+                      <div style={{ fontSize:11, fontWeight:"bold", color, lineHeight:1.2 }}>{cat}</div>
+                      {(isCoreRow || (isGermanRow && germanDLI)) &&
+                        <span style={{ fontSize:8, background:color+"18", color, borderRadius:3, padding:"1px 4px", border:`1px solid ${color}33` }}>CORE · A+B</span>}
+                      {cat==="German Culture" &&
+                        <span style={{ fontSize:8, background:"#fef2f2", color:"#dc2626", borderRadius:3, padding:"1px 4px", border:"1px solid #fecaca", marginLeft:2 }}>DLI · 1 sem</span>}
+                    </div>
+                  </div>
+
+                  {ALL_PERIODS.map(period => {
+                    const cls = byPeriod[period];
+                    if (!cls) return <div key={period} style={{ minHeight:54, borderRadius:3, background:"#f0f2f5", border:"1px solid #e4e8ed" }} />;
+
+                    const status = getStatus(cls);
+                    const seats = cls[grade===7?"gr7":"gr8"];
+                    const isHov = hoveredId === cls.id;
+                    const otherSemLabel = activeSemester===1?"S2":"S1";
+                    const pair = findCorePair(cls);
+                    const pairSelected = pair && activeIds.has(pair.id);
+                    const pairPreselected = pair && !s2Touched && s2PreselectedIds.has(pair.id);
+                    const isLinked = (status==="selected"||status==="preselected") && (pairSelected||pairPreselected);
+                    const isCore = locksAB(cls.classType);
+
+                    const s = {
+                      available:        { bg:"white",     border:`1.5px solid ${color}`,     text:color,       cursor:"pointer"     },
+                      selected:         { bg:color,       border:`1.5px solid ${color}`,     text:"white",     cursor:"pointer"     },
+                      preselected:      { bg:color+"55",  border:`2px dashed ${color}`,      text:"white",     cursor:"pointer"     },
+                      "other-sem":      { bg:color+"1a",  border:`1.5px solid ${color}55`,   text:color+"99",  cursor:"default"     },
+                      blocked:          { bg:"#f5f5f5",   border:"1.5px solid #e0e0e0",      text:"#bbb",      cursor:"not-allowed" },
+                      "category-taken": { bg:"#fafafa",   border:"1.5px dashed #d8d8d8",     text:"#ccc",      cursor:"not-allowed" },
+                      "family-taken":   { bg:"#fafafa",   border:"1.5px dashed #fbbf24",     text:"#d97706",   cursor:"not-allowed" },
+                      "grade-na":       { bg:"#f8f8f8",   border:"1px solid #ebebeb",        text:"#ddd",      cursor:"default"     },
+                    }[status] || { bg:"#f8f8f8", border:"1px solid #eee", text:"#ddd", cursor:"default" };
+
+                    return (
+                      <div key={period}
+                        onClick={() => toggleClass(cls)}
+                        onMouseEnter={() => setHoveredId(cls.id)}
+                        onMouseLeave={() => setHoveredId(null)}
+                        title={
+                          status==="blocked"         ? `Period ${period} is taken` :
+                          status==="other-sem"       ? `Assigned in ${otherSemLabel}` :
+                          status==="preselected"     ? `Pre-selected from S1 — click to remove, or click a different option to replace` :
+                          status==="grade-na"        ? `Not offered for grade ${grade}` :
+                          status==="category-taken"  ? "This core subject already assigned this semester" :
+                          status==="family-taken"    ? `Already taking a ${getNameFamily(cls.name)} class` :
+
+                          isCore                     ? `${cls.name} — click to select both A & B days` :
+                          `${cls.name} · ${seats} seats`
+                        }
+                        style={{
+                          minHeight:54, borderRadius:3, background:s.bg, border:s.border,
+                          display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                          cursor:s.cursor, padding:"3px 2px", textAlign:"center", transition:"all 0.1s",
+                          transform: isHov && status==="available" ? "scale(1.04)" : "scale(1)",
+                          boxShadow: isHov && status==="available" ? `0 2px 8px ${color}44` : "none",
+                          outline: isLinked ? `2px solid white` : "none",
+                          outlineOffset: isLinked ? "-3px" : "0",
+                        }}>
+                        <div style={{ fontSize:9, fontWeight:"bold", color:s.text, lineHeight:1.2 }}>{cls.name}</div>
+                        {status!=="grade-na" && seats>0 && <div style={{ fontSize:8, color:s.text, opacity:0.65, marginTop:1 }}>{seats} seats</div>}
+                        {(status==="selected"||status==="preselected") && isCore && <div style={{ fontSize:8, color:"white", marginTop:1 }}>✓ A+B</div>}
+                        {(status==="selected"||status==="preselected") && !isCore && <div style={{ fontSize:8, color:"white", marginTop:1 }}>✓ S{activeSemester}</div>}
+                        {status==="preselected" && <div style={{ fontSize:7, color:"rgba(255,255,255,0.8)", marginTop:0 }}>↩ from S1</div>}
+                        {status==="other-sem" && <div style={{ fontSize:8, color:s.text, marginTop:1 }}>{otherSemLabel}✓</div>}
+                        {status==="family-taken" && <div style={{ fontSize:7, color:s.text, marginTop:1 }}>duplicate</div>}
+
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
+            {/* Legend */}
+            <div style={{ marginTop:14, display:"flex", gap:12, flexWrap:"wrap", fontSize:10, color:"#8a9aaa", borderTop:"1px solid #dde3ec", paddingTop:12 }}>
+              <div style={{ fontWeight:"bold", color:"#5a7a9a", marginRight:4 }}>Class types:</div>
+              {[
+                { s:{ background:"#2563eb22", border:"2px solid #2563eb" }, label:"Core (A+B linked)" },
+                { s:{ background:"#7c3aed22", border:"1.5px solid #7c3aed" }, label:"Required full-year (1 day)" },
+                { s:{ background:"#d9770622", border:"1.5px solid #d97706" }, label:"Required 1-semester (1 day)" },
+                { s:{ background:"white", border:"1px solid #aaa" }, label:"Elective (1 day)" },
+              ].map(l => (
+                <div key={l.label} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                  <div style={{ width:13, height:11, borderRadius:2, ...l.s }} />
+                  <span>{l.label}</span>
+                </div>
+              ))}
+              <div style={{ width:"100%", display:"flex", gap:12, flexWrap:"wrap", marginTop:4 }}>
+                <div style={{ fontWeight:"bold", color:"#5a7a9a", marginRight:4 }}>Status:</div>
+                {[
+                  { s:{ background:"#2563eb", border:"1.5px solid #2563eb" }, label:"Selected" },
+                  { s:{ background:"#2563eb1a", border:"1.5px solid #2563eb55" }, label:"Other semester" },
+                  { s:{ background:"#f5f5f5", border:"1.5px solid #e0e0e0" }, label:"Blocked" },
+                  { s:{ background:"#fafafa", border:"1.5px dashed #fbbf24" }, label:"Duplicate name" },
+                  { s:{ background:"#2563eb22", border:"2px dashed #2563eb" }, label:"Pre-selected from S1 (click to change)" },
+                ].map(l => (
+                  <div key={l.label} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                    <div style={{ width:13, height:11, borderRadius:2, ...l.s }} />
+                    <span>{l.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div style={{ background:"#fff", borderLeft:"1px solid #dde3ec", padding:16, overflowY:"auto", display:"flex", flexDirection:"column", gap:16 }}>
+
+            <div>
+              <div style={{ fontSize:14, fontWeight:"bold", color:"#1e3a5f" }}>{studentName||"Student Schedule"}</div>
+              <div style={{ fontSize:10, color:"#8a9aaa" }}>Grade {grade}{germanDLI?" · German DLI":""}</div>
+            </div>
+
+            {/* Requirements */}
+            <div>
+              <div style={{ fontSize:10, fontWeight:"bold", color:"#1e3a5f", letterSpacing:1, marginBottom:8, textTransform:"uppercase", display:"flex", justifyContent:"space-between" }}>
+                <span>Requirements</span>
+                <span style={{ color:metCount===totalReqs?"#16a34a":"#d97706" }}>{metCount}/{totalReqs}</span>
+              </div>
+              {reqResults.map(req => (
+                <div key={req.id} style={{ display:"flex", alignItems:"flex-start", gap:6, marginBottom:6, padding:"5px 6px", borderRadius:4,
+                  background:req.status==="met"?"#f0fdf4":req.status==="partial"?"#fffbeb":"#fff5f5",
+                  border:`1px solid ${req.status==="met"?"#bbf7d0":req.status==="partial"?"#fde68a":"#fecaca"}` }}>
+                  <span style={{ fontSize:12 }}>{req.status==="met"?"✅":req.status==="partial"?"⚠️":"⬜"}</span>
+                  <div>
+                    <div style={{ fontSize:10, color:req.status==="met"?"#15803d":req.status==="partial"?"#92400e":"#b91c1c", fontWeight:600 }}>{req.label}</div>
+                    {req.note && <div style={{ fontSize:9, color:"#8a9aaa", marginTop:1 }}>{req.note}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* S1 / S2 class lists */}
+            {[1,2].map(sem => {
+              const semClasses = sem===1?s1Classes:s2Classes;
+              const isActive = activeSemester===sem;
+              const semIds = sem===1?s1Ids:s2Ids;
+              const setSemIds = sem===1?setS1Ids:setS2Ids;
+              return (
+                <div key={sem}>
+                  <div style={{ fontSize:10, fontWeight:"bold", letterSpacing:1, marginBottom:5, textTransform:"uppercase", display:"flex", justifyContent:"space-between", alignItems:"center", color:isActive?"#4a90d9":"#1e3a5f" }}>
+                    <span>Semester {sem}{isActive?" ●":""}</span>
+                    {!isActive && <button onClick={() => setActiveSemester(sem)} style={{ fontSize:9, padding:"2px 7px", borderRadius:4, border:"1px solid #dde3ec", background:"white", color:"#8a9aaa", cursor:"pointer" }}>Edit</button>}
+                  </div>
+                  {semClasses.length===0
+                    ? <div style={{ fontSize:10, color:"#b0bec8", fontStyle:"italic" }}>No classes added.</div>
+                    : semClasses.map(cls => {
+                        const badge = typeBadge(cls);
+                        return (
+                          <div key={cls.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"3px 6px", marginBottom:2, borderRadius:4, background:"#f8fafc", border:"1px solid #e8ecf2", borderLeft:`3px solid ${catColor(cls.category)}` }}>
+                            <div>
+                              <div style={{ fontSize:10, fontWeight:"bold", color:"#1e2a3a" }}>{cls.name}</div>
+                              <div style={{ fontSize:8, color:badge.color }}>{badge.label} · P{cls.period}</div>
+                            </div>
+                            {isActive && (
+                              <button onClick={() => {
+                                const next = new Set(semIds);
+                                next.delete(cls.id);
+                                const pair = findCorePair(cls);
+                                if (pair) next.delete(pair.id);
+                                setSemIds(next);
+                              }} style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:14, padding:0 }}>×</button>
+                            )}
+                          </div>
+                        );
+                      })
+                  }
+                </div>
+              );
+            })}
+
+            {/* Period grid */}
+            <div>
+              <div style={{ fontSize:10, fontWeight:"bold", color:"#1e3a5f", letterSpacing:1, marginBottom:5, textTransform:"uppercase" }}>Periods · S{activeSemester}</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:2 }}>
+                {ALL_PERIODS.map(p => {
+                  const taken = activeLockedPeriods.has(p);
+                  const s1carry = false; // no hard S2 locks
+                  return (
+                    <div key={p} style={{ padding:"3px 5px", borderRadius:3,
+                      background:s1carry?"#fffbeb":taken?"#fff0f0":"#f0fff4",
+                      border:`1px solid ${s1carry?"#fde68a":taken?"#fca5a5":"#bbf7d0"}`,
+                      fontSize:9, display:"flex", justifyContent:"space-between" }}>
+                      <span style={{ color:s1carry?"#92400e":taken?"#dc2626":"#16a34a", fontWeight:600 }}>P{p}</span>
+                      <span style={{ color:s1carry?"#92400e":taken?"#dc2626":"#16a34a" }}>{s1carry?"🔒S1":taken?"✗":"✓"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Open slots */}
+            <div style={{ padding:8, borderRadius:5, background:"#f0fdf4", border:"1px solid #bbf7d0", marginTop:"auto" }}>
+              <div style={{ fontSize:9, color:"#16a34a", fontWeight:"bold" }}>Open Slots · S{activeSemester}</div>
+              <div style={{ fontSize:24, fontWeight:"bold", color:"#16a34a" }}>{stillAvailable.length}</div>
+              <div style={{ fontSize:9, color:"#86efac" }}>available for grade {grade}</div>
+            </div>
+
+            <div style={{ display:"flex", gap:6 }}>
+              {activeIds.size>0 && (
+                <button onClick={() => { setActiveIds(new Set()); if (activeSemester===2) setS2Touched(false); }}
+                  style={{ flex:1, padding:"5px", borderRadius:4, background:"#fff0f0", border:"1px solid #fecaca", color:"#b91c1c", cursor:"pointer", fontSize:10 }}>
+                  Reset S{activeSemester}
+                </button>
+              )}
+              {(s1Ids.size>0||s2Ids.size>0) && (
+                <button onClick={() => { setS1Ids(new Set()); setS2Ids(new Set()); }}
+                  style={{ flex:1, padding:"5px", borderRadius:4, background:"white", border:"1px solid #dde3ec", color:"#8a9aaa", cursor:"pointer", fontSize:10 }}>
+                  Clear All
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+    // ── Mount ─────────────────────────────────────────────────────────────────
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<Scheduler />);
+  </script>
+  <script type="module">
+  // 1. Import the core App and the Firestore database functions
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+  import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+  // 2. Your Firebase configuration (Keep your keys here)
+  const firebaseConfig = {
+    apiKey: "AIzaSyAp4IoX2_u_ItfiWgIaHEgn_NEWB9rGDgE",
+    authDomain: "student-scheduler-v1.firebaseapp.com",
+    projectId: "student-scheduler-v1",
+    storageBucket: "student-scheduler-v1.firebasestorage.app",
+    messagingSenderId: "1024159761425",
+    appId: "1:1024159761425:web:179e0d0b944246697a1db0"
+  };
+
+  // 3. Initialize Firebase and Firestore
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // 4. TEST FUNCTION: This is how we save our first "Synthetic" student
+  async function testFirestoreConnection() {
+    try {
+      // Remember: FERPA safety first! We use fake data for testing.
+      const docRef = await addDoc(collection(db, "test_students"), {
+        name: "Test Student (Synthetic)",
+        schoolId: "herriman-high-test",
+        preferences: ["Baking 101", "Advanced Bash Scripting"]
       });
-    </script>
-  </body>
+      console.log("Success! Document written with ID: ", docRef.id);
+      alert("Firestore is connected and working!");
+    } catch (e) {
+      console.error("Error adding document: ", e);
+      alert("Error: " + e.message);
+    }
+  }
+
+  // 5. THE "MODULE" TRICK: 
+  // We attach our function to the 'window' object so your HTML buttons can find it.
+  window.testFirestoreConnection = testFirestoreConnection;
+
+</script>
+
+<button onclick="testFirestoreConnection()">Test Firestore Connection</button>
+</body>
 </html>
