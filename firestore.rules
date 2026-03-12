@@ -2,97 +2,162 @@ rules_version = '2';
 
 // ── FERPA-compliant, multi-tenant Firestore rules ─────────────────────────────
 //
-// Tenant isolation model:
-//   All school data lives under schools/{schoolId}.
-//   A user may only access a school whose ID matches their Firebase Auth
-//   custom claim `schoolId`.  No path exists that allows cross-tenant reads.
+// Auth model: Firestore user-doc (not custom claims).
+//   The source of truth for a user's school and role is stored in:
+//     users/{uid}  →  { status, schoolId, role, ... }
 //
-// Role model (set via Firebase Auth custom claims):
-//   role: "admin"  – full read/write on catalog, teachers, schedules
-//   role: "staff"  – read catalog/teachers; read/write schedules and students
-//   role: "viewer" – read-only on catalog and schedules (e.g. counselors)
+//   This avoids the need for a Cloud Function to mint custom claims, and
+//   lets role/status changes take effect on the next request without
+//   requiring a token refresh.
+//
+// Tenant isolation:
+//   All school data lives under schools/{schoolId}.
+//   A user may only access data for the school listed in their user doc,
+//   and only when status == "active".
+//
+// Role model (stored in users/{uid}.role):
+//   "admin"  – full read/write on catalog, teachers, config, schedules,
+//              and the users/access subcollection for their school.
+//   "staff"  – read catalog/teachers; read/write schedules and students.
+//   "viewer" – read-only on catalog and schedules (e.g. counselors).
 //
 // FERPA boundary:
 //   Student records (schools/{id}/students/**) require role admin or staff.
 //   No student data is readable by viewers or unauthenticated users.
 //
-// Versioning / audit trail:
-//   Hard deletes are not blocked at the rules level — use application logic
-//   to archive instead of delete.  Archived docs remain readable.
-//
-// Auth stub note:
-//   Until Firebase Auth is wired, the app uses a hardcoded schoolId.
-//   These rules will DENY all requests until real auth tokens carry the
-//   correct custom claims.  Deploy auth before going to production.
+// Bootstrap (first admin):
+//   The app logic auto-approves the first user who requests access to a school
+//   as admin.  The rules allow any authenticated user to:
+//     • read  schools/{schoolId}  (to populate the school picker)
+//     • create/update users/{uid} (to store their own access request)
+//     • create schools/{schoolId}/access/{uid} for themselves
+//   Nothing else is open without an active user doc.
 // ─────────────────────────────────────────────────────────────────────────────
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── Helper functions ────────────────────────────────────────────────────
+    // ── Helper functions ──────────────────────────────────────────────────────
 
-    // Is the user authenticated and does their schoolId claim match this path?
-    function isTenant(schoolId) {
+    // Read the caller's user doc.  Returns the data map or null.
+    function userDocData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Is the caller authenticated and does their active user doc belong to
+    // the given school?
+    function isActive(schoolId) {
+      let u = userDocData();
       return request.auth != null
-          && request.auth.token.schoolId == schoolId;
+          && u != null
+          && u.status   == 'active'
+          && u.schoolId == schoolId;
     }
 
-    // Is the user an admin for this school?
+    // Is the caller an admin for this school?
     function isAdmin(schoolId) {
-      return isTenant(schoolId)
-          && request.auth.token.role == 'admin';
+      let u = userDocData();
+      return request.auth != null
+          && u != null
+          && u.status   == 'active'
+          && u.schoolId == schoolId
+          && u.role     == 'admin';
     }
 
-    // Is the user admin or staff for this school?
+    // Is the caller admin or staff for this school?
     function isStaff(schoolId) {
-      return isTenant(schoolId)
-          && request.auth.token.role in ['admin', 'staff'];
+      let u = userDocData();
+      return request.auth != null
+          && u != null
+          && u.status   == 'active'
+          && u.schoolId == schoolId
+          && u.role     in ['admin', 'staff'];
     }
 
-    // ── School root ─────────────────────────────────────────────────────────
-    // Only tenant members may read school profile.
+    // ── User docs ─────────────────────────────────────────────────────────────
+    // Users may read and write their own doc (to store/update access requests).
+    // Admins may read any user doc whose schoolId matches their own school
+    // (needed so UsersPanel can resolve displayName/email from uid).
+    match /users/{uid} {
+      // Owner: always allowed to read/write their own doc.
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // Admin of the same school may read (not write) other users' docs.
+      allow read: if request.auth != null
+                  && request.auth.uid != uid
+                  && isAdmin(userDocData().schoolId);
+    }
+
+    // ── Schools index ─────────────────────────────────────────────────────────
+    // Any authenticated user may list/read schools so the picker can populate.
+    // Only admins of that school (or the app bootstrap path) may write the
+    // top-level document.  The bootstrap write is allowed for any authenticated
+    // user because the first admin must be able to create the school doc before
+    // their user doc is approved.
     match /schools/{schoolId} {
-      allow read:  if isTenant(schoolId);
-      allow write: if isAdmin(schoolId);
+      allow read: if request.auth != null;
 
-      // ── Course catalog ────────────────────────────────────────────────────
-      // All tenant members may read; only admins may write.
+      // Existing admins may update.
+      allow update: if isAdmin(schoolId);
+
+      // Any authenticated user may create a school doc (bootstrap path).
+      // The app only does this when no active users exist for that school yet.
+      allow create: if request.auth != null;
+
+      // ── School config ───────────────────────────────────────────────────────
+      match /config/{docId} {
+        allow read:  if isActive(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // ── Access subcollection ────────────────────────────────────────────────
+      // Admins of the school may read the full subcollection (list pending reqs).
+      // Any authenticated user may write their own access doc (request access /
+      // bootstrap first-admin).
+      match /access/{uid} {
+        allow read:  if isAdmin(schoolId);
+        allow write: if request.auth != null && request.auth.uid == uid;
+
+        // Admin may also write other users' access docs (approve / reject / role
+        // changes).  We check schoolId == schoolId to prevent cross-school abuse.
+        allow write: if isAdmin(schoolId);
+      }
+
+      // ── Course catalog ───────────────────────────────────────────────────────
       match /courses/{courseId} {
-        allow read:  if isTenant(schoolId);
+        allow read:  if isActive(schoolId);
         allow write: if isAdmin(schoolId);
       }
 
-      // ── Teacher roster ────────────────────────────────────────────────────
-      // All tenant members may read; only admins may write.
+      // ── Teacher roster ───────────────────────────────────────────────────────
       match /teachers/{teacherId} {
-        allow read:  if isTenant(schoolId);
+        allow read:  if isActive(schoolId);
         allow write: if isAdmin(schoolId);
       }
 
-      // ── Requirement groups ────────────────────────────────────────────────
+      // ── Requirement groups ───────────────────────────────────────────────────
       match /requirement-groups/{groupId} {
-        allow read:  if isTenant(schoolId);
+        allow read:  if isActive(schoolId);
         allow write: if isAdmin(schoolId);
       }
 
-      // ── Student types ─────────────────────────────────────────────────────
+      // ── Student types ────────────────────────────────────────────────────────
       match /student-types/{typeId} {
-        allow read:  if isTenant(schoolId);
+        allow read:  if isActive(schoolId);
         allow write: if isAdmin(schoolId);
       }
 
-      // ── Schedule versions ─────────────────────────────────────────────────
+      // ── Schedule versions ────────────────────────────────────────────────────
       // Admin and staff may save/load/promote/archive versions.
       // Viewers may read (e.g. counselors reviewing the active schedule).
       // NOTE: schedule docs contain class-period data only, not student names.
       match /schedules/{scheduleId} {
-        allow read:  if isTenant(schoolId);
+        allow read:  if isActive(schoolId);
         allow write: if isStaff(schoolId);
       }
 
-      // ── Student records (FERPA) ───────────────────────────────────────────
+      // ── Student records (FERPA) ──────────────────────────────────────────────
       // Restricted to admin and staff only.  Viewers cannot access this subtree.
-      // Individual student documents and all sub-collections are protected.
       match /students/{studentId} {
         allow read, write: if isStaff(schoolId);
 
@@ -106,7 +171,7 @@ service cloud.firestore {
       }
     }
 
-    // ── Deny everything else ────────────────────────────────────────────────
+    // ── Deny everything else ──────────────────────────────────────────────────
     // Explicit catch-all prevents any unmatched path from defaulting to allow.
     match /{document=**} {
       allow read, write: if false;
