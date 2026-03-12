@@ -1,19 +1,115 @@
 rules_version = '2';
 
+// ── FERPA-compliant, multi-tenant Firestore rules ─────────────────────────────
+//
+// Tenant isolation model:
+//   All school data lives under schools/{schoolId}.
+//   A user may only access a school whose ID matches their Firebase Auth
+//   custom claim `schoolId`.  No path exists that allows cross-tenant reads.
+//
+// Role model (set via Firebase Auth custom claims):
+//   role: "admin"  – full read/write on catalog, teachers, schedules
+//   role: "staff"  – read catalog/teachers; read/write schedules and students
+//   role: "viewer" – read-only on catalog and schedules (e.g. counselors)
+//
+// FERPA boundary:
+//   Student records (schools/{id}/students/**) require role admin or staff.
+//   No student data is readable by viewers or unauthenticated users.
+//
+// Versioning / audit trail:
+//   Hard deletes are not blocked at the rules level — use application logic
+//   to archive instead of delete.  Archived docs remain readable.
+//
+// Auth stub note:
+//   Until Firebase Auth is wired, the app uses a hardcoded schoolId.
+//   These rules will DENY all requests until real auth tokens carry the
+//   correct custom claims.  Deploy auth before going to production.
+// ─────────────────────────────────────────────────────────────────────────────
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
+    // ── Helper functions ────────────────────────────────────────────────────
+
+    // Is the user authenticated and does their schoolId claim match this path?
+    function isTenant(schoolId) {
+      return request.auth != null
+          && request.auth.token.schoolId == schoolId;
+    }
+
+    // Is the user an admin for this school?
+    function isAdmin(schoolId) {
+      return isTenant(schoolId)
+          && request.auth.token.role == 'admin';
+    }
+
+    // Is the user admin or staff for this school?
+    function isStaff(schoolId) {
+      return isTenant(schoolId)
+          && request.auth.token.role in ['admin', 'staff'];
+    }
+
+    // ── School root ─────────────────────────────────────────────────────────
+    // Only tenant members may read school profile.
+    match /schools/{schoolId} {
+      allow read:  if isTenant(schoolId);
+      allow write: if isAdmin(schoolId);
+
+      // ── Course catalog ────────────────────────────────────────────────────
+      // All tenant members may read; only admins may write.
+      match /courses/{courseId} {
+        allow read:  if isTenant(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // ── Teacher roster ────────────────────────────────────────────────────
+      // All tenant members may read; only admins may write.
+      match /teachers/{teacherId} {
+        allow read:  if isTenant(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // ── Requirement groups ────────────────────────────────────────────────
+      match /requirement-groups/{groupId} {
+        allow read:  if isTenant(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // ── Student types ─────────────────────────────────────────────────────
+      match /student-types/{typeId} {
+        allow read:  if isTenant(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // ── Schedule versions ─────────────────────────────────────────────────
+      // Admin and staff may save/load/promote/archive versions.
+      // Viewers may read (e.g. counselors reviewing the active schedule).
+      // NOTE: schedule docs contain class-period data only, not student names.
+      match /schedules/{scheduleId} {
+        allow read:  if isTenant(schoolId);
+        allow write: if isStaff(schoolId);
+      }
+
+      // ── Student records (FERPA) ───────────────────────────────────────────
+      // Restricted to admin and staff only.  Viewers cannot access this subtree.
+      // Individual student documents and all sub-collections are protected.
+      match /students/{studentId} {
+        allow read, write: if isStaff(schoolId);
+
+        match /requests/{requestId} {
+          allow read, write: if isStaff(schoolId);
+        }
+
+        match /schedules/{scheduleId} {
+          allow read, write: if isStaff(schoolId);
+        }
+      }
+    }
+
+    // ── Deny everything else ────────────────────────────────────────────────
+    // Explicit catch-all prevents any unmatched path from defaulting to allow.
     match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2026, 4, 10);
+      allow read, write: if false;
     }
   }
 }

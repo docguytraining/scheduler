@@ -1,0 +1,453 @@
+# School Info
+
+school:
+  id: 00123 #uniqe value given by app
+  name: Summit Academy Independence #name of school
+  address: 123 Main St. Bluffdale, UT 84065 #address of school
+  calendar-year-start: 2026 #year school starts calendar
+  calendar-year-end: 2027 #year school ends calendar
+  schedule-type: core-block #type of schedule school uses [traditional, block, core-block, hybrid]
+  immersion: true #if school has immersion program
+  immersion-languages:
+  #  - Spanish
+    - German
+  grades: [7,8]
+  blocks:
+    - A: [1,2,3,4,5,6]
+    - B: [1,2,3,4,5,6]
+  semesters: [Fall, Spring]
+
+
+requiremennt-groups:
+  - core:
+    - language-arts-7: [ENG7, ENG7F, ENG7H]
+    - language-arts-8: [ENG8, ENG8F, ENG8H]
+    - math-7: [MATH7, MATH7F, MATH7H]
+    - math-8: [MATH8, MATH8F, MATH8H, MATHS1]
+    - science-7: [SCI7, SCI7F, SCI7H]
+    - science-8: [SCI8, SCI8F, SCI8H]
+    - german-7: [GER1, GER2]
+    - german-8: [GER2,GER3]
+  - required-electives:
+    - physical-education: [PE,FITNESS,YOGA,CARDIO]
+
+student-types:
+  - standard: # unique value given by app
+    description: Students in this program take a standard schedule of classes, and can choose from all available electives. # description of student type, used for filtering 
+    grade-requirements:
+      - grade: 7
+        required-classes: [CCA, HISTUT]
+        required-groups: [language-arts-7, math-7, science-7, physical-education]
+      - grade: 8
+        required-classes: [DIGLIT, HISTUS, HEALTH]
+        required-groups: [language-arts-8, math-8, science-8, physical-education]
+  - german-immersion: # unique value given by app
+    description: Students in this program take German immersion full year, and German Culture one semester.  # description of student type, used for filtering 
+    immersion-language: German
+    extends: standard # if this student type has the same requirements as another student type, you can use "extends" to reference that student type and only list the differences in requirements below
+    grade-requirements:
+      - grade: 7
+        required-classes: [GERC]
+        required-groups: [german-7]
+      - grade: 8
+        required-classes: [GERC]
+        required-groups: [german-8]
+
+classes:
+  - core:
+    -language-arts:
+      - English-7:
+          course-code: ENG7 #unique value given by app
+          blocks: both # Options are: [A, B, both, either] meaning the class is offered in only block A or B, or you have to be in both blocks of this class in the same period, or you can be in either block of this class
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false # if true, students can take this class multiple times in different semesters or years
+          seats: 28 # number of seats available in class, if null or not provided, assume unlimited seats
+      - English-7-Fundamentals:
+          course-code: ENG7F #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - English-7-Honors:
+          course-code: ENG7H #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - English-8:
+          course-code: ENG8 #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - English-8-Fundamentals:
+          course-code: ENG8F #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 20
+      - English-8-Honors:
+          course-code: ENG8H #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - German-1:
+          course-code: GER1 #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          immersion-language: German
+          repeatable: false
+          seats: 15
+      - German-2:
+          course-code: GER2 #unique value given by app
+          blocks: both
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          immersion-language: German
+          repeatable: false
+          seats: 14
+      - German-3:
+          course-code: GER3 #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          immersion-language: German
+          repeatable: false
+          seats: 15
+    -math:
+      - Math-7-Fundamentals:
+          course-code: MATH7F #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 20
+      - Math-7:
+          course-code: MATH7 #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - Math-7-Honors:
+          course-code: MATH7H #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - Math-8-Fundamentals:
+          course-code: MATH8F #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2          
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 20
+      - Math-8:
+          course-code: MATH8 #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - Math-8-Honors:
+          course-code: MATH8H #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - Math-Secondary-1:
+          course-code: MATHS1 #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 8
+          approval-required: true
+    -science:
+      - Science-7-Fundamentals:
+          course-code: SCI7F #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 20
+      - Science-7:
+          course-code: SCI7 #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - Science-7-Honors:
+          course-code: SCI7H #unique value given by app
+          blocks: both
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 20
+      - Science-8-Fundamentals:
+          course-code: SCI8F #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 20
+      - Science-8:
+          course-code: SCI8 #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+      - Science-8-Honors:
+          course-code: SCI8H #unique value given by app
+          blocks: both
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+  - required-electives:
+    - history:
+      - Utah-Studies:
+          course-code: HISTUT #unique value given by app
+          blocks: either
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: false
+          repeatable: false
+          seats: 28
+      - US-History:
+          course-code: HISTUS #unique value given by app
+          blocks: either
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 28
+    - world-languages:
+      - German-Culture:
+          course-code: GERC #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: false
+          immersion-language: German
+          repeatable: true
+          seats: 15
+    - healthy-living:
+      - Health:
+          course-code: HEALTH #unique value given by app
+          blocks: either
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: false
+          repeatable: false
+          seats: 28
+      - Physical-Education:
+          course-code: PE #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: true
+          repeatable: false
+          seats: 28
+      - Fitness:
+          course-code: FITNESS #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: false
+          repeatable: false
+          seats: 28
+      - Yoga:
+          course-code: YOGA #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: false
+          repeatable: false
+          seats: 28
+      - Cardio:
+          course-code: CARDIO #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: false
+          repeatable: false
+          seats: 28
+          
+    - career:
+      - CCA:
+          course-code: CCA #unique value given by app
+          blocks: either
+          grades: [7]
+          semesters: [Fall, Spring]
+          semesters-required: 2
+          full-year: true
+          repeatable: false
+          seats: 28
+      - Digtal Literacy:
+          course-code: DIGLIT #unique value given by app
+          blocks: either
+          grades: [8]
+          semesters: [Fall, Spring]
+          semesters-required: 1
+          full-year: false
+          repeatable: false
+          seats: 28
+  - electives:
+    - world-languages:
+      - Spanish 1:
+          course-code: SPAN1 #unique value given by app
+          prerequisites: []
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 15
+      - Spanish 2:
+          course-code: SPAN2 #unique value given by app
+          prerequisites: [SPAN1]
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          full-year: true
+          change-at-semester: true
+          repeatable: false
+          seats: 14
+    - study-skills:
+      - Study Skills:
+          course-code: STUDY #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          full-year: false
+          repeatable: true
+          seats: 14
+      - Academic Achievement:
+          course-code: ACHIEVE #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          full-year: false
+          repeatable: true
+          seats: 8 
+          approval-required: true # if true, students need approval from counselor or admin to enroll in this class
+    - family-and-consumer-science:
+      - Food and Nutrition:
+          course-code: FOOD #unique value given by app
+          blocks: either
+          grades: [7,8]
+          semesters: [Fall, Spring]
+          full-year: false
+          repeatable: true
+          seats: 14
+
+teachers:
+  - language-arts:
+    - teacher-id: jane.doe # unique value given by app
+      name: Jane Doe
+      title: English 7 Teacher
+      email: jane.doe@example.com
+      qualified-courses: [ENG7, ENG7F, ENG7H]
+      max-sections: 5
+      blocks-available: [A, B]
+      semesters-available: [Fall, Spring]
+      unavailable: [A5,A6,B5,B6] # list of blocks and periods teacher is unavailable, format is block followed by period (e.g. A1, B3)
+      lunch-assignment: 1 # Either 1 or 2
+    - teacher-id: john.smith # unique value given by app
+      name: John Smith
+      title: English 8 Teacher
+      email: john.smith@example.com
+      qualified-courses: [ENG8, ENG8F, ENG8H]
+      max-sections: 5
+      blocks-available: [A, B]
+      semesters-available: [Fall, Spring]
+      unavailable: [A1,B1,B2,A2]
+      lunch-assignment: 2
