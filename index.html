@@ -1499,14 +1499,6 @@ function CourseSetup({ schoolId }) {
               </div>
             </div>
             <div>
-              <label className="field-label">Semesters Required</label>
-              <select className="field-input" value={form.semestersRequired}
-                onChange={e => fld("semestersRequired", parseInt(e.target.value))}>
-                <option value={1}>1 semester</option>
-                <option value={2}>2 semesters (full year)</option>
-              </select>
-            </div>
-            <div>
               <label className="field-label">Seats</label>
               <input className="field-input" type="number" min={1}
                 value={form.seats} onChange={e => fld("seats", parseInt(e.target.value)||0)} />
@@ -1558,7 +1550,7 @@ function CourseSetup({ schoolId }) {
 const EMPTY_TEACHER = {
   teacherId:"", name:"", title:"", email:"", assignedCourses:[],
   maxSectionsPerBlock:{}, blocksAvailable:["A","B"], semestersAvailable:["Fall","Spring"],
-  unavailable:[], lunchAssignment:{}, active:true,
+  unavailable:[], lunchAssignment:{}, hasPrepPeriod:true, active:true,
 };
 
 function TeacherSetup({ schoolId, schoolConfig }) {
@@ -1639,7 +1631,7 @@ function TeacherSetup({ schoolId, schoolConfig }) {
     const hdr = ["Teacher ID","Name","Title","Email","Assigned Courses",
                  ...blockKeys.map(b => `Max Sections (${b} days)`),
                  ...blockKeys.map(b => `Lunch (${b} days)`),
-                 "Blocks Available","Semesters Available","Unavailable Periods","Active"];
+                 "Blocks Available","Semesters Available","Unavailable Periods","Has Prep Period","Active"];
     const rows = [hdr, ...teachers.map(t => {
       // Normalize legacy integer lunchAssignment for export
       const la = (typeof t.lunchAssignment === "number")
@@ -1651,7 +1643,7 @@ function TeacherSetup({ schoolId, schoolConfig }) {
         ...blockKeys.map(b => (t.maxSectionsPerBlock||{})[b] ?? 5),
         ...blockKeys.map(b => la[b] ?? 1),
         (t.blocksAvailable||[]).join(","), (t.semestersAvailable||[]).join(","),
-        (t.unavailable||[]).join(","), t.active?"yes":"no",
+        (t.unavailable||[]).join(","), t.hasPrepPeriod !== false ? "yes" : "no", t.active?"yes":"no",
       ];
     })];
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1712,6 +1704,7 @@ function TeacherSetup({ schoolId, schoolConfig }) {
           blocksAvailable:    split(r["Blocks Available"]),
           semestersAvailable: split(r["Semesters Available"]),
           unavailable:        split(r["Unavailable Periods"]),
+          hasPrepPeriod:      String(r["Has Prep Period"]||"yes").trim().toLowerCase() !== "no",
           active:             String(r["Active"]||"yes").trim().toLowerCase() !== "no",
         };
         batch.set(fsCol(schoolId, "teachers").doc(id), teacher, { merge: true });
@@ -1993,6 +1986,16 @@ function TeacherSetup({ schoolId, schoolConfig }) {
                   value={(form.unavailable||[]).join(",")}
                   onChange={e => fld("unavailable", e.target.value.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean))}
                   placeholder="A5,A6,B5,B6" />
+              </div>
+              <div style={{ marginTop:14 }}>
+                <label className="field-label" style={{ marginBottom:6 }}>Prep Period</label>
+                <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer",
+                  fontSize:12, color:"#374151" }}>
+                  <input type="checkbox"
+                    checked={form.hasPrepPeriod !== false}
+                    onChange={e => fld("hasPrepPeriod", e.target.checked)} />
+                  Allow a prep period in the schedule builder
+                </label>
               </div>
 
               <div style={{ marginTop:14 }}>
@@ -4486,7 +4489,7 @@ function App() {
             { id:"teachers",      label:"👩‍🏫 Teachers"           },
             { id:"student-types", label:"📋 Student Types"      },
             { id:"school",        label:"⚙ School"              },
-            { id:"generate",      label:"🤖 Generate Schedule", soon:true },
+            { id:"generate",      label:"🤖 Generate Schedule" },
           ].map(({ id, label, soon }) => (
             <button key={id}
               className={`nav-tab${page===id?" active":""}${soon?" soon":""}`}
@@ -4604,6 +4607,7 @@ function App() {
           initialSub={route.sub || "config"}
           onSubChange={sub => navigate("school", sub)} />
       )}
+      {page === "generate"      && <GenerateSchedule schoolId={schoolId} schoolConfig={schoolConfig} navigate={navigate} />}
 
       {/* "Add another school" overlay — full-screen SchoolPickerScreen in add mode */}
       {addSchoolOpen && (
@@ -4615,6 +4619,887 @@ function App() {
             onClose={() => setAddSchoolOpen(false)} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GENERATE SCHEDULE — manual drag-and-drop schedule builder
+// ══════════════════════════════════════════════════════════════════════════════
+function GenerateSchedule({ schoolId, schoolConfig, navigate }) {
+  const [teachers,          setTeachers]          = useState([]);
+  const [courses,           setCourses]           = useState([]);
+  const [placements,        setPlacements]        = useState([]);
+  const [semester,          setSemester]          = useState(null);
+  const [selectedTeacherId, setSelectedTeacherId] = useState(null);
+  const [dropTarget,        setDropTarget]        = useState(null);
+  const [dragData,          setDragData]          = useState(null);
+  const [saving,            setSaving]            = useState(false);
+  const [savedMsg,          setSavedMsg]          = useState("");
+  const [loading,           setLoading]           = useState(true);
+  const [savedSchedules,    setSavedSchedules]    = useState([]);
+  const [currentSaveId,     setCurrentSaveId]     = useState(null);
+  const [currentSaveName,   setCurrentSaveName]   = useState("");
+  const [showLoadPanel,     setShowLoadPanel]     = useState(false);
+  const [showSaveAs,        setShowSaveAs]        = useState(false);
+  const [saveAsName,        setSaveAsName]        = useState("");
+  const [cellPopover,       setCellPopover]       = useState(null); // { teacherId, col, rect }
+  const [filterGrades,      setFilterGrades]      = useState(new Set());
+  const [filterCategories,  setFilterCategories]  = useState(new Set());
+
+  // ── Derived config ──────────────────────────────────────────────────────────
+  const blockKeys = useMemo(() =>
+    Object.keys(schoolConfig?.blocks || { A:6, B:6 }).sort(),
+    [schoolConfig]);
+
+  const maxPeriods = useMemo(() =>
+    Math.max(...blockKeys.map(b => schoolConfig?.blocks?.[b] || 6)),
+    [blockKeys, schoolConfig]);
+
+  // Columns ordered A1, B1, A2, B2 …
+  const columns = useMemo(() => {
+    const cols = [];
+    for (let p = 1; p <= maxPeriods; p++) {
+      blockKeys.forEach(b => {
+        if (p <= (schoolConfig?.blocks?.[b] || 6)) cols.push({ block:b, period:p, key:`${b}${p}` });
+      });
+    }
+    return cols;
+  }, [blockKeys, maxPeriods, schoolConfig]);
+
+  const grades    = useMemo(() => [...(schoolConfig?.grades  || [7,8])].sort((a,b)=>a-b), [schoolConfig]);
+  const semesters = useMemo(() => schoolConfig?.semesters || ["Fall","Spring"], [schoolConfig]);
+
+  // ── Maps ───────────────────────────────────────────────────────────────────
+  const courseMap  = useMemo(() => { const m={}; courses.forEach(c  => m[c.code]  = c);  return m; }, [courses]);
+  const teacherMap = useMemo(() => { const m={}; teachers.forEach(t => m[t._id]   = t);  return m; }, [teachers]);
+
+  // ── Current-semester placements ────────────────────────────────────────────
+  const semPlacements = useMemo(() =>
+    placements.filter(p => p.semester === semester), [placements, semester]);
+
+  // ── Seat counts per column per grade ───────────────────────────────────────
+  // For each column key, build { [grade]: seatCount }
+  const seatsByCol = useMemo(() => {
+    const result = {};
+    columns.forEach(col => { result[col.key] = {}; });
+    semPlacements.forEach(pl => {
+      if (pl.courseCode === "__PREP__") return;             // preps don't contribute seats
+      const course = courseMap[pl.courseCode];
+      if (!course) return;
+      const cGrades = [...(course.grades||[])].sort((a,b)=>a-b);
+      if (!cGrades.length) return;
+      const seats = course.seats || 0;
+      const n     = cGrades.length;
+      const base  = Math.floor(seats / n);
+      const extra = seats % n;
+      // Which columns does this placement contribute to?
+      const affCols = pl.block === "both"
+        ? columns.filter(c => c.period === pl.periodNum)
+        : columns.filter(c => c.period === pl.periodNum && c.block === pl.block);
+      affCols.forEach(col => {
+        cGrades.forEach((g, i) => {
+          const count = base + (i < extra ? 1 : 0);
+          result[col.key][g] = (result[col.key][g] || 0) + count;
+        });
+      });
+    });
+    return result;
+  }, [semPlacements, columns, courseMap]);
+
+  // ── Teacher section usage per block day ────────────────────────────────────
+  const teacherUsage = useMemo(() => {
+    const u = {};
+    semPlacements.forEach(pl => {
+      if (!u[pl.teacherId]) u[pl.teacherId] = {};
+      const bs = pl.block === "both" ? blockKeys : [pl.block];
+      bs.forEach(b => { u[pl.teacherId][b] = (u[pl.teacherId][b]||0) + 1; });
+    });
+    return u;
+  }, [semPlacements, blockKeys]);
+
+  // ── Filter helpers ─────────────────────────────────────────────────────────
+  function toggleGrade(g) {
+    setFilterGrades(prev => { const n = new Set(prev); n.has(g) ? n.delete(g) : n.add(g); return n; });
+  }
+  function toggleCategory(cat) {
+    setFilterCategories(prev => { const n = new Set(prev); n.has(cat) ? n.delete(cat) : n.add(cat); return n; });
+  }
+  function coursePassesFilter(c) {
+    if (!c) return false;
+    const gradeOk = filterGrades.size === 0 || (c.grades||[]).some(g => filterGrades.has(g));
+    const catOk   = filterCategories.size === 0 || filterCategories.has(c.topCategory);
+    return gradeOk && catOk;
+  }
+
+  // ── Selected teacher & their courses ───────────────────────────────────────
+  const selectedTeacher = teacherMap[selectedTeacherId] || null;
+  const selectedCourses = useMemo(() => {
+    if (!selectedTeacher || !semester) return [];
+    return (selectedTeacher.assignedCourses || selectedTeacher.qualifiedCourses || [])
+      .map(code => courseMap[code])
+      .filter(c => c && c.active !== false && (c.semesters||[]).includes(semester) && coursePassesFilter(c));
+  }, [selectedTeacher, courseMap, semester, filterGrades, filterCategories]);
+
+  // ── Init semester ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (semesters.length && !semester) setSemester(semesters[0]);
+  }, [semesters]);
+
+  // ── Load data (once on mount — schedules are loaded explicitly by the user) ─
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      fsGetAll(schoolId, "teachers"),
+      fsGetAll(schoolId, "courses"),
+      fsGetAll(schoolId, "schedules"),
+    ]).then(([ts, cs, saved]) => {
+      setTeachers(ts.filter(t => t.active !== false));
+      setCourses(cs.filter(c => c.active !== false));
+      // Sort saved schedules newest-first (use id as timestamp proxy if no updatedAt)
+      const sorted = [...saved].sort((a, b) => {
+        const ta = a.updatedAt?.toMillis?.() || parseInt(a._id) || 0;
+        const tb = b.updatedAt?.toMillis?.() || parseInt(b._id) || 0;
+        return tb - ta;
+      });
+      setSavedSchedules(sorted);
+      setLoading(false);
+    }).catch(e => { console.error(e); setLoading(false); });
+  }, [schoolId]);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function isUnavail(teacher, col)  { return (teacher.unavailable||[]).includes(col.key); }
+  function canDrop(teacher, col)    { return !isUnavail(teacher, col); }
+
+  function cellPlacements(teacherId, col) {
+    return semPlacements.filter(pl =>
+      pl.teacherId === teacherId &&
+      pl.periodNum === col.period &&
+      (pl.block === "both" || pl.block === col.block)
+    );
+  }
+
+  // ── Block resolver (shared by drop and popover click) ──────────────────────
+  function resolveBlock(courseCode, col) {
+    if (courseCode === "__PREP__") return col.block;
+    const course = courseMap[courseCode];
+    if (!course) return null;
+    if (course.blocks === "both") return "both";
+    if (course.blocks === "A" || course.blocks === "B")
+      return course.blocks === col.block ? course.blocks : null; // null = wrong block day
+    return col.block; // "either"
+  }
+
+  // ── Drop handler (new placements + drag-to-move existing) ─────────────────
+  function handleDrop(col, teacherId) {
+    if (!dragData) return;
+    const teacher = teacherMap[teacherId];
+    if (!teacher || !canDrop(teacher, col)) return;
+
+    const block = resolveBlock(dragData.courseCode, col);
+    if (block === null) return;                             // incompatible block day
+
+    const pl = {
+      id:         `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      teacherId,
+      courseCode: dragData.courseCode,
+      periodNum:  col.period,
+      block,
+      semester,
+    };
+    setPlacements(prev => {
+      // If moving an existing placement, remove the old one first
+      const base = dragData.isMove ? prev.filter(p => p.id !== dragData.placementId) : prev;
+      return [...base, pl];
+    });
+    setDragData(null);
+    setDropTarget(null);
+  }
+
+  // ── Click-to-place from cell popover ───────────────────────────────────────
+  function placeFromPopover(courseCode) {
+    if (!cellPopover) return;
+    const { teacherId, col } = cellPopover;
+    const teacher = teacherMap[teacherId];
+    if (!teacher || !canDrop(teacher, col)) return;
+    const block = resolveBlock(courseCode, col);
+    if (block === null) return;
+    const pl = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+      teacherId, courseCode, periodNum: col.period, block, semester,
+    };
+    setPlacements(prev => [...prev, pl]);
+    setCellPopover(null);
+  }
+
+  function removePlacement(id) { setPlacements(prev => prev.filter(p => p.id !== id)); }
+
+  // ── Schedule persistence ────────────────────────────────────────────────────
+  async function save() {
+    if (!currentSaveId || !currentSaveName) { setShowSaveAs(true); setSaveAsName(currentSaveName); return; }
+    setSaving(true);
+    try {
+      const doc = { id:currentSaveId, name:currentSaveName, semester, placements,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      await fsSave(schoolId, "schedules", currentSaveId, doc);
+      setSavedSchedules(prev => prev.map(s =>
+        (s._id === currentSaveId || s.id === currentSaveId) ? { ...s, ...doc, updatedAt: new Date() } : s));
+      setSavedMsg("✓ Saved");
+      setTimeout(() => setSavedMsg(""), 2500);
+    } catch(e) { setSavedMsg("Save failed"); }
+    setSaving(false);
+  }
+
+  async function confirmSaveAs() {
+    const name = saveAsName.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      const id  = String(Date.now());
+      const doc = { id, name, semester, placements,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+      await fsSave(schoolId, "schedules", id, doc);
+      const entry = { ...doc, _id: id, createdAt: new Date(), updatedAt: new Date() };
+      setSavedSchedules(prev => [entry, ...prev]);
+      setCurrentSaveId(id);
+      setCurrentSaveName(name);
+      setShowSaveAs(false);
+      setSaveAsName("");
+      setSavedMsg(`✓ Saved as "${name}"`);
+      setTimeout(() => setSavedMsg(""), 3000);
+    } catch(e) { setSavedMsg("Save failed"); }
+    setSaving(false);
+  }
+
+  function loadSchedule(s) {
+    setPlacements(s.placements || []);
+    if (s.semester) setSemester(s.semester);
+    setCurrentSaveId(s._id || s.id);
+    setCurrentSaveName(s.name || s.semester || s._id || "");
+    setSelectedTeacherId(null);
+    setShowLoadPanel(false);
+  }
+
+  function newSchedule() {
+    setPlacements([]);
+    setCurrentSaveId(null);
+    setCurrentSaveName("");
+    setSelectedTeacherId(null);
+    setShowLoadPanel(false);
+  }
+
+  // ── Constants ──────────────────────────────────────────────────────────────
+  const CAT_BG    = { core:"#dbeafe", "required-electives":"#ede9fe", electives:"#cffafe" };
+  const CAT_COLOR = { core:"#1e3a5f", "required-electives":"#5b21b6", electives:"#0e7490" };
+  const gradeEnrollment = schoolConfig?.gradeEnrollment || {};
+
+  if (loading) return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+      height:"calc(100vh - 48px)", color:"#8a9aaa", fontSize:13 }}>
+      Loading schedule…
+    </div>
+  );
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 48px)", overflow:"hidden" }}>
+
+      {/* ── TOP BAR ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 16px",
+        background:"white", borderBottom:"1px solid #e0e8f0", flexShrink:0, flexWrap:"wrap" }}>
+        <div style={{ fontSize:13, fontWeight:"bold", color:"#1e3a5f", flexShrink:0 }}>Schedule Builder</div>
+
+        {/* Semester filter */}
+        <div className="fl" style={{ gap:4 }}>
+          {semesters.map(s => (
+            <button key={s} onClick={() => { setSemester(s); setSelectedTeacherId(null); }}
+              style={{ padding:"3px 12px", fontSize:11, border:"1px solid", borderRadius:4, cursor:"pointer",
+                background: semester===s ? "#1e3a5f" : "white",
+                color:      semester===s ? "white"   : "#6b7280",
+                borderColor:semester===s ? "#1e3a5f" : "#c0d0e0" }}>
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {/* Current schedule name */}
+        <div style={{ display:"flex", alignItems:"center", gap:6, background:"#f0f4f8",
+          borderRadius:4, padding:"3px 10px", fontSize:11, color:"#374151", flexShrink:0 }}>
+          <span style={{ color:"#9ca3af" }}>Schedule:</span>
+          <span style={{ fontWeight:"bold" }}>{currentSaveName || "New (unsaved)"}</span>
+        </div>
+
+        {/* Save-as inline form */}
+        {showSaveAs && (
+          <div className="fl" style={{ gap:5, alignItems:"center", flexShrink:0 }}>
+            <input autoFocus value={saveAsName} onChange={e => setSaveAsName(e.target.value)}
+              onKeyDown={e => { if (e.key==="Enter") confirmSaveAs(); if (e.key==="Escape") setShowSaveAs(false); }}
+              placeholder="Schedule name…"
+              style={{ fontSize:11, padding:"3px 8px", border:"1px solid #c0d0e0",
+                borderRadius:4, width:180, outline:"none" }} />
+            <button onClick={confirmSaveAs} disabled={!saveAsName.trim() || saving}
+              className="btn btn-primary" style={{ fontSize:11, padding:"3px 10px" }}>
+              {saving ? "…" : "Save"}
+            </button>
+            <button onClick={() => setShowSaveAs(false)}
+              style={{ fontSize:11, padding:"3px 8px", background:"none", border:"1px solid #c0d0e0",
+                borderRadius:4, cursor:"pointer", color:"#6b7280" }}>
+              Cancel
+            </button>
+          </div>
+        )}
+
+        <div style={{ flex:1 }} />
+        {savedMsg && <span style={{ fontSize:11, flexShrink:0,
+          color: savedMsg.startsWith("✓") ? "#15803d" : "#b91c1c" }}>{savedMsg}</span>}
+
+        <button onClick={() => setShowLoadPanel(true)}
+          style={{ fontSize:11, padding:"4px 10px", border:"1px solid #c0d0e0",
+            borderRadius:4, cursor:"pointer", background:"white", color:"#374151", flexShrink:0 }}>
+          📂 Open
+        </button>
+        <button onClick={() => { setShowSaveAs(true); setSaveAsName(currentSaveName); }}
+          style={{ fontSize:11, padding:"4px 10px", border:"1px solid #c0d0e0",
+            borderRadius:4, cursor:"pointer", background:"white", color:"#374151", flexShrink:0 }}>
+          Save As…
+        </button>
+        <button className="btn btn-primary" style={{ fontSize:11, flexShrink:0 }}
+          onClick={save} disabled={saving}>
+          {saving ? "Saving…" : "💾 Save"}
+        </button>
+      </div>
+
+      {/* ── LOAD PANEL ── */}
+      {showLoadPanel && (
+        <div style={{ position:"fixed", inset:0, zIndex:100, display:"flex", alignItems:"flex-start",
+          justifyContent:"center", paddingTop:60, background:"rgba(0,0,0,0.35)" }}
+          onClick={() => setShowLoadPanel(false)}>
+          <div style={{ background:"white", borderRadius:8, boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
+            width:480, maxHeight:"70vh", display:"flex", flexDirection:"column", overflow:"hidden" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+              padding:"12px 16px", borderBottom:"1px solid #e0e8f0" }}>
+              <div style={{ fontSize:13, fontWeight:"bold", color:"#1e3a5f" }}>Saved Schedules</div>
+              <button onClick={() => setShowLoadPanel(false)}
+                style={{ background:"none", border:"none", cursor:"pointer", fontSize:18,
+                  color:"#9ca3af", lineHeight:1 }}>×</button>
+            </div>
+            <div style={{ overflowY:"auto", flex:1 }}>
+              {/* New blank schedule option */}
+              <div onClick={newSchedule}
+                style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px",
+                  borderBottom:"1px solid #f0f4f8", cursor:"pointer", background:"#f8fafc" }}
+                onMouseEnter={e => e.currentTarget.style.background="#eef3ff"}
+                onMouseLeave={e => e.currentTarget.style.background="#f8fafc"}>
+                <span style={{ fontSize:18 }}>➕</span>
+                <div>
+                  <div style={{ fontSize:12, fontWeight:"bold", color:"#374151" }}>New blank schedule</div>
+                  <div style={{ fontSize:10, color:"#9ca3af" }}>Start fresh with no placements</div>
+                </div>
+              </div>
+              {savedSchedules.length === 0 && (
+                <div style={{ padding:"24px 16px", textAlign:"center", fontSize:12,
+                  color:"#9ca3af", fontStyle:"italic" }}>
+                  No saved schedules yet.
+                </div>
+              )}
+              {savedSchedules.map(s => {
+                const sid  = s._id || s.id;
+                const name = s.name || s.semester || sid;
+                const ts   = s.updatedAt?.toDate?.() || (parseInt(sid) ? new Date(parseInt(sid)) : null);
+                const dateStr = ts ? ts.toLocaleDateString(undefined, { month:"short", day:"numeric", year:"numeric" }) : "";
+                const isCurrent = sid === currentSaveId;
+                return (
+                  <div key={sid} onClick={() => loadSchedule(s)}
+                    style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px",
+                      borderBottom:"1px solid #f0f4f8", cursor:"pointer",
+                      background: isCurrent ? "#eef3ff" : "white" }}
+                    onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background="#f5f8ff"; }}
+                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background="white"; }}>
+                    <span style={{ fontSize:18 }}>🗓</span>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12, fontWeight:"bold", color:"#1e2a3a",
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {name}{isCurrent ? " ✓" : ""}
+                      </div>
+                      <div style={{ fontSize:10, color:"#9ca3af" }}>
+                        {s.semester ? `${s.semester} · ` : ""}
+                        {(s.placements||[]).length} placement{(s.placements||[]).length !== 1 ? "s" : ""}
+                        {dateStr ? ` · Last saved ${dateStr}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FILTER BAR ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 16px",
+        background:"#f8fafc", borderBottom:"1px solid #e0e8f0", flexShrink:0, flexWrap:"wrap" }}>
+
+        {/* Grade filters */}
+        <span style={{ fontSize:10, fontWeight:"bold", color:"#9ca3af",
+          textTransform:"uppercase", letterSpacing:0.4, flexShrink:0 }}>Grade</span>
+        {grades.map(g => {
+          const on = filterGrades.has(g);
+          return (
+            <button key={g} onClick={() => toggleGrade(g)}
+              style={{ padding:"2px 9px", fontSize:10, border:"1px solid", borderRadius:10, cursor:"pointer",
+                background: on ? "#1e3a5f" : "white", color: on ? "white" : "#6b7280",
+                borderColor: on ? "#1e3a5f" : "#c0d0e0", fontWeight: on ? "bold" : "normal" }}>
+              {g}
+            </button>
+          );
+        })}
+
+        {/* Divider */}
+        <div style={{ width:1, height:14, background:"#d1d5db", margin:"0 2px", flexShrink:0 }} />
+
+        {/* Category filters */}
+        <span style={{ fontSize:10, fontWeight:"bold", color:"#9ca3af",
+          textTransform:"uppercase", letterSpacing:0.4, flexShrink:0 }}>Category</span>
+        {TOP_CATS.map(cat => {
+          const on  = filterCategories.has(cat);
+          const clr = TOP_CAT_COLORS[cat] || "#6b7280";
+          return (
+            <button key={cat} onClick={() => toggleCategory(cat)}
+              style={{ padding:"2px 9px", fontSize:10, border:"1px solid", borderRadius:10, cursor:"pointer",
+                background: on ? clr : "white", color: on ? "white" : "#6b7280",
+                borderColor: on ? clr : "#c0d0e0", fontWeight: on ? "bold" : "normal" }}>
+              {TOP_CAT_LABELS[cat]}
+            </button>
+          );
+        })}
+
+        {/* Clear */}
+        {(filterGrades.size > 0 || filterCategories.size > 0) && (
+          <>
+            <div style={{ width:1, height:14, background:"#d1d5db", margin:"0 2px", flexShrink:0 }} />
+            <button onClick={() => { setFilterGrades(new Set()); setFilterCategories(new Set()); }}
+              style={{ padding:"2px 9px", fontSize:10, border:"1px solid #ef4444", borderRadius:10,
+                cursor:"pointer", background:"white", color:"#ef4444" }}>
+              Clear filters
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* ── GRID ── */}
+      <div style={{ flex:1, overflowX:"auto", overflowY:"auto" }}>
+        <table style={{ borderCollapse:"collapse", tableLayout:"fixed", fontSize:11, minWidth:"100%" }}>
+          <colgroup>
+            <col style={{ width:150 }} />
+            {columns.map(col => <col key={col.key} style={{ width:84 }} />)}
+          </colgroup>
+          {/* thead is sticky as a whole — no per-cell top offsets needed, works for any number of grades */}
+          <thead style={{ position:"sticky", top:0, zIndex:15 }}>
+
+            {/* Row 1: Period group headers */}
+            <tr>
+              <th style={{ padding:"5px 10px", textAlign:"left", background:"#e8eef8",
+                borderBottom:"1px solid #c0d0e8", borderRight:"2px solid #b0c0d8",
+                position:"sticky", left:0, zIndex:20, fontSize:10, color:"#5a7a9a", fontWeight:"bold" }}>
+                Teacher
+              </th>
+              {(() => {
+                const groups = [];
+                for (let p = 1; p <= maxPeriods; p++) {
+                  const cols = columns.filter(c => c.period === p);
+                  if (cols.length) groups.push({ p, cols });
+                }
+                return groups.map(({ p, cols }) => (
+                  <th key={p} colSpan={cols.length}
+                    style={{ padding:"5px 6px", textAlign:"center", background:"#e8eef8",
+                      borderBottom:"1px solid #c0d0e8", borderLeft:"2px solid #b0c0d8",
+                      fontSize:10, fontWeight:"bold", color:"#1e3a5f" }}>
+                    Period {p}
+                  </th>
+                ));
+              })()}
+            </tr>
+
+            {/* Row 2: Block labels */}
+            <tr>
+              <th style={{ padding:"3px 10px", background:"#f0f4f8",
+                borderBottom:"1px solid #c8d4e0", borderRight:"2px solid #b0c0d8",
+                position:"sticky", left:0, zIndex:20 }} />
+              {columns.map((col, i) => {
+                const firstOfPeriod = i===0 || columns[i-1].period !== col.period;
+                return (
+                  <th key={col.key}
+                    style={{ padding:"3px 4px", textAlign:"center", background:"#f0f4f8",
+                      borderBottom:"1px solid #c8d4e0",
+                      borderLeft: firstOfPeriod ? "2px solid #b0c0d8" : "1px solid #e0e8f0",
+                      fontSize:10, fontWeight:"bold",
+                      color: col.block==="A" ? "#1e5fa0" : col.block==="B" ? "#5b21b6" : "#0e7490" }}>
+                    {col.block}
+                  </th>
+                );
+              })}
+            </tr>
+
+            {/* Rows 3+: Grade seat capacity — no top offsets needed, thead handles vertical sticking */}
+            {grades.map((g, gi) => {
+              const enrollment = gradeEnrollment[g] || 0;
+              const isLast     = gi === grades.length - 1;
+              return (
+                <tr key={g}>
+                  <td style={{ padding:"2px 10px", background:"#f8fafc",
+                    borderBottom: isLast ? "2px solid #9ab0c8" : "1px solid #dde6f0",
+                    borderRight:"2px solid #b0c0d8",
+                    position:"sticky", left:0, zIndex:20,
+                    fontSize:9, fontWeight:"bold", color:"#5a7a9a", whiteSpace:"nowrap" }}>
+                    Gr {g}{enrollment > 0 ? ` (of ${enrollment})` : ""}
+                  </td>
+                  {columns.map((col, i) => {
+                    const seats          = (seatsByCol[col.key]||{})[g] || 0;
+                    const firstOfPeriod  = i===0 || columns[i-1].period !== col.period;
+                    const pct            = enrollment > 0 ? seats / enrollment : null;
+                    const bg             = pct === null ? "transparent"
+                                         : pct >= 1    ? "#dcfce7"
+                                         : pct >  0    ? "#fef9c3"
+                                         : "transparent";
+                    const clr            = pct === null ? "#d0d8e4"
+                                         : pct >= 1    ? "#15803d"
+                                         : pct >  0    ? "#92400e"
+                                         : "#d0d8e4";
+                    return (
+                      <td key={col.key}
+                        style={{ padding:"2px 4px", textAlign:"center", background:bg,
+                          borderBottom: isLast ? "2px solid #9ab0c8" : "1px solid #dde6f0",
+                          borderLeft: firstOfPeriod ? "2px solid #b0c0d8" : "1px solid #e0e8f0",
+                          fontSize:9, fontWeight: seats>0 ? "bold" : "normal", color:clr }}>
+                        {seats > 0 ? seats : ""}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </thead>
+
+          {/* ── TEACHER ROWS ── */}
+          <tbody>
+            {teachers.length === 0
+              ? (
+                <tr><td colSpan={columns.length + 1}
+                  style={{ textAlign:"center", color:"#8a9aaa", fontSize:12, padding:40 }}>
+                  No active teachers found. Add teachers in the Teachers tab first.
+                </td></tr>
+              )
+              : teachers.map(teacher => {
+                const isSel  = selectedTeacherId === teacher._id;
+                const usage  = teacherUsage[teacher._id] || {};
+                const rowBg  = isSel ? "#eef3ff" : "white";
+                return (
+                  <tr key={teacher._id}
+                    style={{ background:rowBg, borderBottom:"1px solid #eef2f6" }}>
+
+                    {/* Teacher name cell — sticky left */}
+                    <td onClick={() => setSelectedTeacherId(isSel ? null : teacher._id)}
+                      style={{ padding:"4px 8px", position:"sticky", left:0, zIndex:5,
+                        background:rowBg, borderRight:"2px solid #b0c0d8", cursor:"pointer",
+                        verticalAlign:"middle" }}>
+                      <div style={{ fontSize:11, fontWeight:"bold", color:"#1e2a3a",
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:130 }}>
+                        {teacher.name}
+                      </div>
+                      <div className="fl" style={{ gap:5, marginTop:1 }}>
+                        {blockKeys.map(b => {
+                          const used = usage[b] || 0;
+                          const max  = (teacher.maxSectionsPerBlock||{})[b] ?? 5;
+                          const over = used >= max;
+                          return (
+                            <span key={b} style={{ fontSize:9, padding:"0 3px", borderRadius:2,
+                              background: over ? "#fee2e2" : "#f0f4f8",
+                              color:      over ? "#b91c1c" : "#6b7280" }}>
+                              {b}:{used}/{max}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </td>
+
+                    {/* Period cells */}
+                    {columns.map((col, i) => {
+                      const unaval = isUnavail(teacher, col);
+                      const ok     = !unaval;
+                      const dtKey  = `${teacher._id}__${col.key}`;
+                      const isDrop = dropTarget === dtKey;
+                      const cp     = cellPlacements(teacher._id, col);
+                      const hasConflict = cp.length > 1;
+                      const firstOfPeriod = i===0 || columns[i-1].period !== col.period;
+
+                      const popOpen = cellPopover?.teacherId === teacher._id && cellPopover?.col?.key === col.key;
+                      return (
+                        <td key={col.key}
+                          style={{ padding:2, verticalAlign:"top",
+                            borderLeft: firstOfPeriod ? "2px solid #b0c0d8" : "1px solid #e8eef4",
+                            outline: hasConflict ? "2px solid #dc2626" : "none",
+                            outlineOffset: "-2px",
+                            background: hasConflict   ? "#fff1f2"
+                                       : isDrop && ok  ? "#dbeafe"
+                                       : popOpen       ? "#eef3ff"
+                                       : unaval        ? "#f3f4f6"
+                                       : isSel         ? "#f5f8ff"
+                                       : "transparent",
+                            minWidth:84, minHeight: hasConflict ? "auto" : 52,
+                            cursor: ok ? "pointer" : "default" }}
+                          onDragOver={e => { if (ok) { e.preventDefault(); setDropTarget(dtKey); } }}
+                          onDragLeave={() => setDropTarget(null)}
+                          onDrop={e => { e.preventDefault(); setDropTarget(null); if (ok) handleDrop(col, teacher._id); }}
+                          onClick={e => {
+                            if (!ok || dragData) return;
+                            // Ignore clicks that originated from a chip or its buttons
+                            if (e.target.closest("[data-chip]")) return;
+                            setSelectedTeacherId(teacher._id);
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setCellPopover(p =>
+                              p?.teacherId === teacher._id && p?.col?.key === col.key
+                                ? null   // toggle off if same cell
+                                : { teacherId: teacher._id, col, rect }
+                            );
+                          }}>
+
+                          {unaval ? (
+                            <div style={{ textAlign:"center", fontSize:12, color:"#c0ccd8",
+                              paddingTop:9, paddingBottom:9 }}>—</div>
+                          ) : (
+                            <div style={{ display:"flex", flexDirection:"column", gap:2,
+                              height: hasConflict ? "auto" : "100%", minHeight: hasConflict ? "auto" : 48 }}>
+                              {hasConflict && (
+                                <div style={{ fontSize:8, fontWeight:"bold", color:"#dc2626",
+                                  textAlign:"center", padding:"1px 2px", letterSpacing:0.2 }}>
+                                  ⚠ CONFLICT — same period
+                                </div>
+                              )}
+                              {cp.map(pl => {
+                                const isPrep = pl.courseCode === "__PREP__";
+                                const c   = isPrep ? null : courseMap[pl.courseCode];
+                                const bg  = hasConflict ? "#fee2e2"
+                                           : isPrep     ? "#f1f5f9"
+                                           : (CAT_BG[c?.topCategory] || "#f0f4f8");
+                                const clr = hasConflict ? "#b91c1c"
+                                           : isPrep     ? "#64748b"
+                                           : (CAT_COLOR[c?.topCategory] || "#4a6080");
+                                return (
+                                  <div key={pl.id} data-chip="1" draggable
+                                    onDragStart={e => {
+                                      e.stopPropagation();
+                                      setCellPopover(null);
+                                      setDragData({ courseCode: pl.courseCode, teacherId: pl.teacherId,
+                                        isMove: true, placementId: pl.id });
+                                    }}
+                                    onDragEnd={() => { setDragData(null); setDropTarget(null); }}
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ display:"flex", flexDirection:"column", justifyContent:"center",
+                                      background:bg, borderLeft:`3px solid ${clr}`,
+                                      borderRadius:3, padding:"3px 3px 3px 5px",
+                                      flex: hasConflict ? "0 0 auto" : 1,
+                                      minHeight: hasConflict ? 36 : 44,
+                                      lineHeight:1.3, cursor:"grab",
+                                      border: hasConflict ? `1px solid #fca5a5` : "none",
+                                      borderLeftWidth:3, borderLeftColor:clr }}>
+                                    <div style={{ display:"flex", alignItems:"center", gap:2 }}>
+                                      <span style={{ fontFamily:"monospace", fontWeight:"bold",
+                                        fontSize:9, color:clr, flexShrink:0 }}>
+                                        {isPrep ? "PREP" : pl.courseCode}
+                                      </span>
+                                      {!isPrep && pl.block === "both" &&
+                                        <span style={{ fontSize:8, color:"#5b21b6", fontWeight:"bold",
+                                          flexShrink:0 }}>A+B</span>}
+                                      <div style={{ flex:1 }} />
+                                      <button onClick={e => { e.stopPropagation(); removePlacement(pl.id); }}
+                                        style={{ background:"none", border:"none", cursor:"pointer",
+                                          color:"#ef4444", fontSize:12, padding:0, lineHeight:1, flexShrink:0 }}>
+                                        ×
+                                      </button>
+                                    </div>
+                                    {!isPrep && c && (
+                                      <div style={{ fontSize:9, color:clr, opacity:0.85,
+                                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                                        maxWidth:"100%", marginTop:1 }}>
+                                        {c.name}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              {/* Empty-cell placeholder so the cell fills the row */}
+                              {cp.length === 0 && (
+                                <div style={{ flex:1, minHeight:44 }} />
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })
+            }
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── COURSE PALETTE ── */}
+      {selectedTeacher && (
+        <div style={{ flexShrink:0, background:"white", borderTop:"2px solid #c8d4e0",
+          padding:"8px 14px 10px", maxHeight:150, overflowY:"auto" }}>
+          <div className="fl" style={{ alignItems:"center", gap:8, marginBottom:5 }}>
+            <span style={{ fontSize:10, fontWeight:"bold", color:"#5a7a9a",
+              textTransform:"uppercase", letterSpacing:0.5 }}>
+              {selectedTeacher.name} — click a cell or drag a course to place it
+            </span>
+            <button onClick={() => navigate && navigate("teachers")}
+              style={{ fontSize:10, color:"#2563eb", background:"none", border:"none",
+                cursor:"pointer", padding:0, textDecoration:"underline", flexShrink:0 }}>
+              Edit profile →
+            </button>
+          </div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+            {/* PREP chip — shown when teacher has prep period enabled */}
+            {selectedTeacher.hasPrepPeriod !== false && (
+              <div draggable
+                onDragStart={() => setDragData({ courseCode:"__PREP__", teacherId:selectedTeacher._id })}
+                onDragEnd={() => { setDragData(null); setDropTarget(null); }}
+                style={{ display:"flex", alignItems:"center", gap:5,
+                  background:"#f1f5f9", border:"1px solid #94a3b8",
+                  borderLeft:"3px solid #64748b",
+                  borderRadius:4, padding:"4px 8px 4px 6px",
+                  cursor:"grab", userSelect:"none" }}>
+                <span style={{ fontFamily:"monospace", fontWeight:"bold", fontSize:11, color:"#334155" }}>PREP</span>
+                <span style={{ fontSize:10, color:"#64748b" }}>Prep period — drops into A or B day separately</span>
+              </div>
+            )}
+            {selectedCourses.length === 0 && selectedTeacher.hasPrepPeriod === false && (
+              <div style={{ fontSize:11, color:"#8a9aaa", fontStyle:"italic" }}>
+                No active courses for {semester} assigned to this teacher.
+              </div>
+            )}
+            {selectedCourses.length === 0 && selectedTeacher.hasPrepPeriod !== false && (
+              <div style={{ fontSize:11, color:"#8a9aaa", fontStyle:"italic", alignSelf:"center" }}>
+                No courses assigned for {semester} — add them on the teacher profile.
+              </div>
+            )}
+            {selectedCourses.map(course => {
+                  const bg  = CAT_BG[course.topCategory]    || "#f0f4f8";
+                  const clr = CAT_COLOR[course.topCategory] || "#4a6080";
+                  const blockHint = course.blocks === "both"   ? " · A+B days"
+                                  : course.blocks === "either" ? ""
+                                  :                              ` · ${course.blocks} days only`;
+                  return (
+                    <div key={course.code} draggable
+                      onDragStart={() => setDragData({ courseCode:course.code, teacherId:selectedTeacher._id })}
+                      onDragEnd={() => { setDragData(null); setDropTarget(null); }}
+                      style={{ display:"flex", alignItems:"center", gap:5,
+                        background:bg, borderLeft:`3px solid ${clr}`,
+                        borderRadius:4, padding:"4px 8px 4px 6px",
+                        cursor:"grab", userSelect:"none", border:`1px solid ${clr}44`,
+                        borderLeftWidth:3, borderLeftColor:clr }}>
+                      <span style={{ fontFamily:"monospace", fontWeight:"bold", fontSize:11, color:clr }}>
+                        {course.code}
+                      </span>
+                      <span style={{ fontSize:10, color:"#374151" }}>{course.name}</span>
+                      <span style={{ fontSize:9, color:"#6b7280" }}>
+                        {course.seats}⊡ Gr{(course.grades||[]).join(",")}
+                        {blockHint}
+                      </span>
+                    </div>
+                  );
+                })}
+          </div>
+        </div>
+      )}
+
+      {/* ── CELL POPOVER ── */}
+      {cellPopover && (() => {
+        const { teacherId, col, rect } = cellPopover;
+        const teacher = teacherMap[teacherId];
+        const tCourses = teacher
+          ? (teacher.assignedCourses || teacher.qualifiedCourses || [])
+              .map(code => courseMap[code])
+              .filter(c => c && c.active !== false && (c.semesters||[]).includes(semester) && coursePassesFilter(c))
+          : [];
+        const hasPrep = teacher?.hasPrepPeriod !== false;
+        // Position below the cell, flip up if near bottom of viewport
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const popH = Math.min(280, 40 + (hasPrep ? 1 : 0) * 28 + tCourses.length * 28);
+        const top  = spaceBelow > popH ? rect.bottom + 2 : rect.top - popH - 2;
+        const left = Math.min(rect.left, window.innerWidth - 248);
+        return (
+          <>
+            {/* Click-away overlay */}
+            <div style={{ position:"fixed", inset:0, zIndex:50 }} onClick={() => setCellPopover(null)} />
+            <div style={{ position:"fixed", top, left, zIndex:51, width:244,
+              background:"white", border:"1px solid #c0d0e0", borderRadius:6,
+              boxShadow:"0 4px 16px rgba(0,0,0,0.13)", overflow:"hidden" }}>
+              {/* Header */}
+              <div style={{ padding:"5px 10px", background:"#e8eef8",
+                borderBottom:"1px solid #d0dce8", fontSize:10, fontWeight:"bold", color:"#1e3a5f",
+                display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span>{teacher?.name} · {col.block} Day Period {col.period}</span>
+                <button onClick={() => setCellPopover(null)}
+                  style={{ background:"none", border:"none", cursor:"pointer",
+                    fontSize:14, color:"#9ca3af", lineHeight:1, padding:0 }}>×</button>
+              </div>
+              {/* Course list */}
+              <div style={{ maxHeight:240, overflowY:"auto", padding:4 }}>
+                {hasPrep && (
+                  <div data-chip="1" onClick={() => placeFromPopover("__PREP__")}
+                    style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 8px",
+                      borderRadius:3, marginBottom:2, cursor:"pointer",
+                      background:"#f1f5f9", border:"1px solid #e2e8f0", borderLeft:"3px solid #64748b" }}
+                    onMouseEnter={e => e.currentTarget.style.background="#e2e8f0"}
+                    onMouseLeave={e => e.currentTarget.style.background="#f1f5f9"}>
+                    <span style={{ fontFamily:"monospace", fontWeight:"bold", fontSize:10, color:"#334155" }}>PREP</span>
+                    <span style={{ fontSize:10, color:"#64748b" }}>Prep period</span>
+                  </div>
+                )}
+                {tCourses.length === 0 && !hasPrep && (
+                  <div style={{ padding:"10px 8px", fontSize:11, color:"#9ca3af", fontStyle:"italic" }}>
+                    No courses assigned for {semester}.
+                  </div>
+                )}
+                {tCourses.map(course => {
+                  const bg      = CAT_BG[course.topCategory]    || "#f0f4f8";
+                  const clr     = CAT_COLOR[course.topCategory] || "#4a6080";
+                  const block   = resolveBlock(course.code, col);
+                  const canPlace = block !== null;
+                  return (
+                    <div key={course.code} data-chip="1"
+                      onClick={() => canPlace && placeFromPopover(course.code)}
+                      style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 8px",
+                        borderRadius:3, marginBottom:2,
+                        cursor: canPlace ? "pointer" : "not-allowed",
+                        background: canPlace ? bg : "#f9fafb",
+                        borderLeft:`3px solid ${canPlace ? clr : "#d1d5db"}`,
+                        opacity: canPlace ? 1 : 0.45 }}
+                      onMouseEnter={e => { if (canPlace) e.currentTarget.style.filter="brightness(0.94)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.filter=""; }}>
+                      <span style={{ fontFamily:"monospace", fontWeight:"bold",
+                        fontSize:10, color: canPlace ? clr : "#9ca3af", flexShrink:0 }}>
+                        {course.code}
+                      </span>
+                      <span style={{ fontSize:10, color: canPlace ? "#374151" : "#9ca3af",
+                        flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {course.name}
+                      </span>
+                      {!canPlace &&
+                        <span style={{ fontSize:9, color:"#9ca3af", flexShrink:0 }}>
+                          {course.blocks}-day only
+                        </span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
