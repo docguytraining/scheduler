@@ -580,13 +580,11 @@ function ScheduleVersionsPanel({ schedule, schoolId, onLoad, onClose }) {
   }[s] || { bg:"#f0f4f8", color:"#334155", label: s });
 
   return (
-    <div style={{ position:"fixed", top:0, right:0, bottom:0, width:380,
-      background:"white", boxShadow:"-4px 0 24px rgba(0,0,0,0.18)",
-      zIndex:200, display:"flex", flexDirection:"column" }}>
+    <div className="sidebar-panel" style={{ width:380 }}>
 
       {/* Header */}
-      <div className="flb" style={{ padding:"13px 16px", background:"#1e3a5f", flexShrink:0 }}>
-        <div style={{ color:"white", fontWeight:"bold", fontSize:14 }}>📁 Schedule History</div>
+      <div className="sidebar-header flb">
+        <div className="sidebar-title">📁 Schedule History</div>
         <button className="btn-ghost" onClick={onClose} style={{ color:"rgba(255,255,255,0.7)" }}>×</button>
       </div>
 
@@ -606,11 +604,11 @@ function ScheduleVersionsPanel({ schedule, schoolId, onLoad, onClose }) {
       )}
 
       {/* Version list */}
-      <div style={{ flex:1, overflowY:"auto", padding:14 }}>
+      <div className="sidebar-body">
         {loading
-          ? <div style={{ textAlign:"center", color:"#8a9aaa", fontSize:12, paddingTop:24 }}>Loading…</div>
+          ? <div className="text-center-muted">Loading…</div>
           : versions.length === 0
-          ? <div style={{ textAlign:"center", color:"#8a9aaa", fontSize:12, paddingTop:24 }}>No saved versions yet.</div>
+          ? <div className="text-center-muted">No saved versions yet.</div>
           : versions.map(v => {
               const st   = statusStyle(v.status);
               const date = v.createdAt?.toDate?.()?.toLocaleDateString("en-US",
@@ -620,10 +618,10 @@ function ScheduleVersionsPanel({ schedule, schoolId, onLoad, onClose }) {
                   borderLeft: `4px solid ${v.status==="active" ? "#16a34a" : v.status==="archived" ? "#a78bfa" : "#c0d0e0"}`,
                   background: v.status==="active" ? "#f0fdf4" : "white" }}>
                   <div className="flb" style={{ alignItems:"flex-start", gap:8 }}>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontSize:12, fontWeight:"bold", color:"#1e2a3a" }}>v{v.version} · {v.name}</div>
-                      <div style={{ fontSize:10, color:"#8a9aaa", marginTop:2 }}>{date} · {v.classCount||0} classes</div>
-                      {v.description && <div style={{ fontSize:10, color:"#6b7280", marginTop:2, fontStyle:"italic" }}>{v.description}</div>}
+                    <div className="flex-1">
+                      <div className="text-heading">v{v.version} · {v.name}</div>
+                      <div className="text-meta">{date} · {v.classCount||0} classes</div>
+                      {v.description && <div className="text-meta" style={{ fontStyle:"italic" }}>{v.description}</div>}
                     </div>
                     <span className="badge" style={{ background:st.bg, color:st.color }}>{st.label}</span>
                   </div>
@@ -654,7 +652,7 @@ function ScheduleVersionsPanel({ schedule, schoolId, onLoad, onClose }) {
           })
         }
         {compareA && !showCompare && (
-          <div style={{ fontSize:10, color:"#4a90d9", textAlign:"center", padding:"6px 0" }}>
+          <div className="text-hint" style={{ color:"var(--color-accent)", textAlign:"center", padding:"6px 0" }}>
             v{compareA.version} selected as base — click "→ Compare" on another version
           </div>
         )}
@@ -665,37 +663,31 @@ function ScheduleVersionsPanel({ schedule, schoolId, onLoad, onClose }) {
         const diff = buildDiff(compareA, compareB);
         return (
           <div style={{ position:"absolute", inset:0, background:"white", zIndex:10, display:"flex", flexDirection:"column" }}>
-            <div className="flb" style={{ padding:"12px 16px", borderBottom:"1px solid #e0e8f0", flexShrink:0 }}>
-              <div style={{ fontSize:13, fontWeight:"bold", color:"#1e3a5f" }}>
+            <div className="modal-header flb">
+              <div className="modal-title">
                 v{compareA.version} → v{compareB.version}
               </div>
               <button className="btn-ghost" onClick={() => { setShowCompare(false); setCompareA(null); setCompareB(null); }}>×</button>
             </div>
-            <div style={{ flex:1, overflowY:"auto", padding:14 }}>
+            <div className="modal-body" style={{ padding:"0.875rem" }}>
               {diff.added.length > 0 && <>
-                <div style={{ fontSize:10, fontWeight:"bold", color:"#15803d", textTransform:"uppercase", marginBottom:6 }}>
+                <div className="section-label" style={{ marginBottom:"0.375rem", color:"var(--color-success)" }}>
                   + Added in v{compareB.version} ({diff.added.length})
                 </div>
                 {diff.added.map((c,i) => (
-                  <div key={i} style={{ fontSize:11, padding:"4px 9px", background:"#f0fdf4", borderRadius:3, marginBottom:3, borderLeft:"3px solid #16a34a" }}>
-                    {c.period} · {c.name}
-                  </div>
+                  <div key={i} className="diff-added">{c.period} · {c.name}</div>
                 ))}
               </>}
               {diff.removed.length > 0 && <>
-                <div style={{ fontSize:10, fontWeight:"bold", color:"#b91c1c", textTransform:"uppercase", marginBottom:6, marginTop:14 }}>
+                <div className="section-label" style={{ marginBottom:"0.375rem", marginTop:"0.875rem", color:"var(--color-error)" }}>
                   − Removed from v{compareA.version} ({diff.removed.length})
                 </div>
                 {diff.removed.map((c,i) => (
-                  <div key={i} style={{ fontSize:11, padding:"4px 9px", background:"#fff5f5", borderRadius:3, marginBottom:3, borderLeft:"3px solid #dc2626" }}>
-                    {c.period} · {c.name}
-                  </div>
+                  <div key={i} className="diff-removed">{c.period} · {c.name}</div>
                 ))}
               </>}
               {diff.added.length === 0 && diff.removed.length === 0 && (
-                <div style={{ textAlign:"center", color:"#8a9aaa", fontSize:12, paddingTop:24 }}>
-                  These versions are identical.
-                </div>
+                <div className="text-center-muted">These versions are identical.</div>
               )}
             </div>
           </div>
@@ -813,16 +805,16 @@ function SchoolConfig({ schoolId, onConfigSaved }) {
   const blockKeys = Object.keys(config.blocks || {}).sort();
 
   return (
-    <div style={{ overflowY:"auto", height:"calc(100vh - 48px)" }}>
-      <div style={{ maxWidth:700, margin:"0 auto", padding:28 }}>
-        <div style={{ fontSize:18, fontWeight:"bold", color:"#1e3a5f", marginBottom:4 }}>School Configuration</div>
-        <div style={{ fontSize:12, color:"#8a9aaa", marginBottom:24 }}>
+    <div className="admin-page">
+      <div className="admin-content" style={{ maxWidth:"43.75rem" }}>
+        <div className="admin-page-title">School Configuration</div>
+        <div className="admin-page-desc">
           Block types, grades, and semesters defined here drive field options throughout the app — especially teacher capacity settings.
         </div>
 
         {/* School info */}
-        <div style={{ background:"white", borderRadius:8, border:"1px solid #e0e8f0", padding:20, marginBottom:16 }}>
-          <div className="section-title" style={{ marginBottom:14 }}>School Information</div>
+        <div className="section-card">
+          <div className="section-title" style={{ marginBottom:"0.875rem" }}>School Information</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
             <div style={{ gridColumn:"1 / -1" }}>
               <label className="field-label">School Name *</label>
@@ -859,7 +851,7 @@ function SchoolConfig({ schoolId, onConfigSaved }) {
         </div>
 
         {/* Academic structure */}
-        <div style={{ background:"white", borderRadius:8, border:"1px solid #e0e8f0", padding:20, marginBottom:16 }}>
+        <div className="section-card">
           <div className="section-title" style={{ marginBottom:14 }}>Academic Structure</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
             <div>
@@ -916,7 +908,7 @@ function SchoolConfig({ schoolId, onConfigSaved }) {
         </div>
 
         {/* Day types / blocks */}
-        <div style={{ background:"white", borderRadius:8, border:"1px solid #e0e8f0", padding:20, marginBottom:16 }}>
+        <div className="section-card">
           <div className="section-title" style={{ marginBottom:6 }}>Day Types (Blocks)</div>
           <div style={{ fontSize:11, color:"#8a9aaa", marginBottom:14 }}>
             Define the block/day types in your schedule (e.g. A days, B days). The period count per block is used to set teacher capacity limits.
@@ -1011,7 +1003,7 @@ function SchoolConfig({ schoolId, onConfigSaved }) {
         </div>
 
         {/* School Logo */}
-        <div style={{ background:"white", borderRadius:8, border:"1px solid #e0e8f0", padding:20, marginBottom:16 }}>
+        <div className="section-card">
           <div className="section-title" style={{ marginBottom:4 }}>School Logo</div>
           <div style={{ fontSize:11, color:"#8a9aaa", marginBottom:14 }}>
             Displayed in the top navigation bar. Max 2 MB, any image format. Changes save immediately.
@@ -1296,7 +1288,7 @@ function CourseSetup({ schoolId, schoolConfig }) {
   const color = TOP_CAT_COLORS[selTop];
 
   return (
-    <div style={{ display:"flex", height:"calc(100vh - 48px)", overflow:"hidden" }}>
+    <div className="page-fill" style={{ flexDirection:"row" }}>
 
       {/* LEFT: Category tree */}
       <div style={{ width:200, background:"white", borderRight:"1px solid #e0e8f0", overflowY:"auto", flexShrink:0 }}>
@@ -1388,7 +1380,7 @@ function CourseSetup({ schoolId, schoolConfig }) {
         )}
 
         {loading
-          ? <div style={{ textAlign:"center", color:"#8a9aaa", fontSize:12, paddingTop:48 }}>Loading courses…</div>
+          ? <div className="text-center-muted" style={{ paddingTop:"3rem" }}>Loading courses…</div>
           : visibleCourses.length === 0
           ? <div style={{ textAlign:"center", color:"#8a9aaa", fontSize:13, paddingTop:48 }}>
               No courses in this category yet.
@@ -1729,7 +1721,7 @@ function CourseSetup({ schoolId, schoolConfig }) {
               ))}
             </div>
             <div className="fl" style={{ gap:7, paddingTop:4 }}>
-              <button className="btn btn-primary" onClick={saveCourse} disabled={saving} style={{ flex:1 }}>
+              <button className="btn btn-primary" onClick={saveCourse} disabled={saving} className="flex-1">
                 {saving ? "Saving…" : "Save Course"}
               </button>
               <button className="btn btn-secondary" onClick={() => setEditId(null)}>Cancel</button>
@@ -1926,7 +1918,7 @@ function TeacherSetup({ schoolId, schoolConfig }) {
   const tdStyle = { padding:"5px 10px", verticalAlign:"middle", fontSize:11 };
 
   return (
-    <div style={{ display:"flex", height:"calc(100vh - 48px)", overflow:"hidden" }}>
+    <div className="page-fill" style={{ flexDirection:"row" }}>
 
       {/* CENTER: cards / list */}
       <div style={{ flex:1, overflowY:"auto", padding:18, background:"#f8fafc" }}>
@@ -1978,7 +1970,7 @@ function TeacherSetup({ schoolId, schoolConfig }) {
         )}
 
         {loading
-          ? <div style={{ textAlign:"center", color:"#8a9aaa", fontSize:12, paddingTop:48 }}>Loading teachers…</div>
+          ? <div className="text-center-muted" style={{ paddingTop:"3rem" }}>Loading teachers…</div>
           : visibleTeachers.length === 0
           ? <div style={{ textAlign:"center", color:"#8a9aaa", fontSize:13, paddingTop:48 }}>
               {search ? `No teachers match "${search}".` : "No teachers yet."}
@@ -2763,70 +2755,52 @@ function Scheduler({ schoolId, schoolConfig }) {
   const gridCols   = `150px repeat(${numPeriods}, minmax(60px,1fr))`;
 
   return (
-    <div style={{ fontFamily:"'Palatino Linotype',Palatino,'Book Antiqua',serif",
-      height:"calc(100vh - 48px)", display:"flex", flexDirection:"column",
-      overflow:"hidden", background:"#f4f6f9", color:"#1e2a3a" }}>
+    <div className="page-fill">
 
       {/* ── TOP BAR ─────────────────────────────────────────────────────────── */}
-      <div style={{ background:"#fff", borderBottom:"1px solid #dde3ec",
-        padding:"7px 18px", display:"flex", alignItems:"center", gap:10,
-        flexWrap:"wrap", flexShrink:0 }}>
+      <div className="panel-toolbar">
 
-        <div style={{ fontSize:13, fontWeight:"bold", color:"#1e3a5f", flexShrink:0 }}>
-          Validate Schedule
-        </div>
+        <div className="panel-toolbar-title">Validate Schedule</div>
 
         {/* Current session name badge */}
-        <div style={{ display:"flex", alignItems:"center", gap:5, background:"#f0f4f8",
-          borderRadius:4, padding:"2px 9px", fontSize:11, color:"#374151", flexShrink:0 }}>
-          <span style={{ color:"#9ca3af" }}>Session:</span>
+        <div className="session-badge">
+          <span className="session-badge-label">Session:</span>
           <span style={{ fontWeight:"bold" }}>{currentSessName || "New (unsaved)"}</span>
         </div>
 
         {/* Save-as inline form */}
         {showSaveAs && (
-          <div className="fl" style={{ gap:5, alignItems:"center", flexShrink:0 }}>
+          <div className="fla flex-none" style={{ gap:"0.3125rem" }}>
             <input autoFocus value={saveAsName} onChange={e => setSaveAsName(e.target.value)}
               onKeyDown={e => { if (e.key==="Enter") confirmSaveAs(); if (e.key==="Escape") setShowSaveAs(false); }}
-              placeholder="Session name…"
-              style={{ fontSize:11, padding:"3px 8px", border:"1px solid #c0d0e0",
-                borderRadius:4, width:180, outline:"none" }} />
+              placeholder="Session name…" className="save-as-input" />
             <button onClick={confirmSaveAs} disabled={!saveAsName.trim()||saving}
-              className="btn btn-primary" style={{ fontSize:11, padding:"3px 10px" }}>
+              className="btn btn-primary btn-sm">
               {saving ? "…" : "Save"}
             </button>
-            <button onClick={() => setShowSaveAs(false)}
-              style={{ fontSize:11, padding:"3px 8px", background:"none", border:"1px solid #c0d0e0",
-                borderRadius:4, cursor:"pointer", color:"#6b7280" }}>
-              Cancel
-            </button>
+            <button onClick={() => setShowSaveAs(false)} className="btn-cancel-sm">Cancel</button>
           </div>
         )}
 
-        <div style={{ flex:1 }} />
-        {savedMsg && <span style={{ fontSize:11, flexShrink:0,
-          color:savedMsg.startsWith("✓")?"#15803d":"#b91c1c" }}>{savedMsg}</span>}
+        <div className="flex-1" />
+        {savedMsg && (
+          <span className={`status-msg flex-none ${savedMsg.startsWith("✓") ? "success" : "error"}`}>
+            {savedMsg}
+          </span>
+        )}
 
         {/* Action buttons */}
-        <button onClick={() => setShowLoadPanel(true)}
-          style={{ fontSize:11, padding:"4px 10px", border:"1px solid #c0d0e0",
-            borderRadius:4, cursor:"pointer", background:"white", color:"#374151", flexShrink:0 }}>
-          📂 Open
-        </button>
+        <button onClick={() => setShowLoadPanel(true)} className="btn-outline flex-none">📂 Open</button>
         <button onClick={() => { setShowSaveAs(true); setSaveAsName(currentSessName); }}
-          style={{ fontSize:11, padding:"4px 10px", border:"1px solid #c0d0e0",
-            borderRadius:4, cursor:"pointer", background:"white", color:"#374151", flexShrink:0 }}>
-          Save As…
-        </button>
+          className="btn-outline flex-none">Save As…</button>
         {schedule && (
-          <button className="btn btn-primary" style={{ fontSize:11, flexShrink:0 }}
-            onClick={saveSession} disabled={saving}>
+          <button className="btn btn-primary btn-sm flex-none" onClick={saveSession} disabled={saving}>
             {saving ? "Saving…" : "💾 Save"}
           </button>
         )}
 
         {/* Divider */}
-        {schedule && <div style={{ width:1, height:18, background:"#e0e8f0", flexShrink:0 }} />}
+        {schedule && <div className="toolbar-divider" />}
 
         {/* Per-session controls — only when a schedule is loaded */}
         {schedule && <>
@@ -2862,11 +2836,10 @@ function Scheduler({ schoolId, schoolConfig }) {
 
       {/* ── SCHEDULE CONFLICT BANNER ─────────────────────────────────────── */}
       {scheduleConflict && (
-        <div style={{ background:"#fff7ed", borderBottom:"2px solid #f97316",
-          padding:"8px 18px", display:"flex", alignItems:"flex-start", gap:10, flexShrink:0 }}>
-          <span style={{ fontSize:16, flexShrink:0 }}>⚠️</span>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:"bold", fontSize:11, color:"#9a3412" }}>
+        <div className="alert-banner alert-banner-warn" style={{ borderBottom:"2px solid #f97316" }}>
+          <span className="flex-none" style={{ fontSize:"1rem" }}>⚠️</span>
+          <div className="flex-1">
+            <div style={{ fontWeight:"bold", fontSize:"var(--text-sm)", color:"#9a3412" }}>
               {scheduleConflict.notFound
                 ? "Base schedule not found — the generated schedule this session was built from may have been deleted or renamed."
                 : "The base schedule has changed since this session was saved."}
@@ -2887,51 +2860,35 @@ function Scheduler({ schoolId, schoolConfig }) {
 
       {/* ── LOAD PANEL ──────────────────────────────────────────────────────── */}
       {showLoadPanel && (
-        <div style={{ position:"fixed", inset:0, zIndex:100, display:"flex", alignItems:"flex-start",
-          justifyContent:"center", paddingTop:60, background:"rgba(0,0,0,0.35)" }}
-          onClick={() => setShowLoadPanel(false)}>
-          <div style={{ background:"white", borderRadius:8, boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
-            width:540, maxHeight:"75vh", display:"flex", flexDirection:"column", overflow:"hidden" }}
+        <div className="modal-overlay" onClick={() => setShowLoadPanel(false)}>
+          <div className="modal-panel" style={{ width:540, maxHeight:"75vh" }}
             onClick={e => e.stopPropagation()}>
 
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-              padding:"12px 16px", borderBottom:"1px solid #e0e8f0" }}>
-              <div style={{ fontSize:13, fontWeight:"bold", color:"#1e3a5f" }}>Open Schedule / Session</div>
-              <button onClick={() => setShowLoadPanel(false)}
-                style={{ background:"none", border:"none", cursor:"pointer", fontSize:18, color:"#9ca3af" }}>×</button>
+            <div className="modal-header">
+              <div className="modal-title">Open Schedule / Session</div>
+              <button onClick={() => setShowLoadPanel(false)} className="btn-ghost" style={{ fontSize:"1.125rem" }}>×</button>
             </div>
 
-            <div style={{ overflowY:"auto", flex:1 }}>
+            <div className="modal-body">
 
               {/* New blank session */}
-              <div onClick={newSession}
-                style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px",
-                  borderBottom:"1px solid #f0f4f8", cursor:"pointer", background:"#f8fafc" }}
-                onMouseEnter={e => e.currentTarget.style.background="#eef3ff"}
-                onMouseLeave={e => e.currentTarget.style.background="#f8fafc"}>
-                <span style={{ fontSize:18 }}>➕</span>
+              <div onClick={newSession} className="list-row list-row-new">
+                <span className="list-row-icon">➕</span>
                 <div>
-                  <div style={{ fontSize:12, fontWeight:"bold", color:"#374151" }}>New blank session</div>
-                  <div style={{ fontSize:10, color:"#9ca3af" }}>Clear everything and start over</div>
+                  <div className="list-row-label" style={{ color:"var(--color-text-secondary)" }}>New blank session</div>
+                  <div className="list-row-meta">Clear everything and start over</div>
                 </div>
               </div>
 
               {/* Generated Schedules */}
               {genSchedules.length > 0 && (
-                <div style={{ padding:"8px 16px 4px", fontSize:10, fontWeight:"bold", color:"#6b7280",
-                  textTransform:"uppercase", letterSpacing:0.5, background:"#f8fafc",
-                  borderBottom:"1px solid #e0e8f0" }}>
-                  Generated Schedules
-                </div>
+                <div className="list-group-header">Generated Schedules</div>
               )}
               {dbLoading && (
-                <div style={{ padding:"16px", textAlign:"center", fontSize:12, color:"#9ca3af" }}>
-                  Loading…
-                </div>
+                <div className="text-center-muted" style={{ padding:"1rem" }}>Loading…</div>
               )}
               {!dbLoading && genSchedules.length === 0 && (
-                <div style={{ padding:"12px 16px", fontSize:11, color:"#9ca3af", fontStyle:"italic",
-                  borderBottom:"1px solid #f0f4f8" }}>
+                <div className="list-row-meta" style={{ padding:"0.75rem 1rem", fontStyle:"italic", borderBottom:"1px solid var(--color-surface-hover)" }}>
                   No generated schedules found. Build one in the Generate Schedule tab first.
                 </div>
               )}
@@ -2943,18 +2900,11 @@ function Scheduler({ schoolId, schoolConfig }) {
                 const isCurrent = sid === sourceScheduleId && !currentSessId;
                 return (
                   <div key={sid} onClick={() => loadFromGenerated(sched)}
-                    style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 16px",
-                      borderBottom:"1px solid #f0f4f8", cursor:"pointer",
-                      background: isCurrent ? "#eef3ff" : "white" }}
-                    onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background="#f5f8ff"; }}
-                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background="white"; }}>
-                    <span style={{ fontSize:17 }}>🤖</span>
+                    className={`list-row${isCurrent ? " is-current" : ""}`}>
+                    <span className="list-row-icon">🤖</span>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:12, fontWeight:"bold", color:"#1e2a3a",
-                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {name}{isCurrent ? " ✓" : ""}
-                      </div>
-                      <div style={{ fontSize:10, color:"#9ca3af" }}>
+                      <div className="list-row-label">{name}{isCurrent ? " ✓" : ""}</div>
+                      <div className="list-row-meta">
                         {(sched.placements||[]).length} placements
                         {dateStr ? ` · ${dateStr}` : ""}
                       </div>
@@ -2964,13 +2914,9 @@ function Scheduler({ schoolId, schoolConfig }) {
               })}
 
               {/* Saved Validate Sessions */}
-              <div style={{ padding:"8px 16px 4px", fontSize:10, fontWeight:"bold", color:"#6b7280",
-                textTransform:"uppercase", letterSpacing:0.5, background:"#f8fafc",
-                borderBottom:"1px solid #e0e8f0", borderTop:"2px solid #e0e8f0" }}>
-                Saved Validate Sessions
-              </div>
+              <div className="list-group-header list-group-divider">Saved Validate Sessions</div>
               {!dbLoading && savedSessions.length === 0 && (
-                <div style={{ padding:"12px 16px", fontSize:11, color:"#9ca3af", fontStyle:"italic" }}>
+                <div className="list-row-meta" style={{ padding:"0.75rem 1rem", fontStyle:"italic" }}>
                   No saved sessions yet.
                 </div>
               )}
@@ -2982,18 +2928,11 @@ function Scheduler({ schoolId, schoolConfig }) {
                 const isCurrent = sid === currentSessId;
                 return (
                   <div key={sid} onClick={() => loadFromSession(sess)}
-                    style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 16px",
-                      borderBottom:"1px solid #f0f4f8", cursor:"pointer",
-                      background: isCurrent ? "#eef3ff" : "white" }}
-                    onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background="#f5f8ff"; }}
-                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background="white"; }}>
-                    <span style={{ fontSize:17 }}>📅</span>
+                    className={`list-row${isCurrent ? " is-current" : ""}`}>
+                    <span className="list-row-icon">📅</span>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:12, fontWeight:"bold", color:"#1e2a3a",
-                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {name}{isCurrent ? " ✓" : ""}
-                      </div>
-                      <div style={{ fontSize:10, color:"#9ca3af" }}>
+                      <div className="list-row-label">{name}{isCurrent ? " ✓" : ""}</div>
+                      <div className="list-row-meta">
                         {sess.studentName ? `${sess.studentName} · ` : ""}
                         Grade {sess.grade || "?"}
                         {dateStr ? ` · ${dateStr}` : ""}
@@ -3009,16 +2948,13 @@ function Scheduler({ schoolId, schoolConfig }) {
 
       {/* ── EMPTY STATE ─────────────────────────────────────────────────────── */}
       {!schedule && (
-        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
-          justifyContent:"center", gap:18 }}>
-          <div style={{ fontSize:44 }}>📅</div>
-          <div style={{ fontSize:20, color:"#1e3a5f" }}>Open a schedule to begin</div>
-          <div style={{ fontSize:12, color:"#8a9aaa", maxWidth:380, textAlign:"center" }}>
+        <div className="empty-state">
+          <div className="empty-state-icon">📅</div>
+          <div className="empty-state-title">Open a schedule to begin</div>
+          <div className="empty-state-desc">
             Load a generated schedule from the database, or continue from a previously saved session.
           </div>
-          <button onClick={() => setShowLoadPanel(true)}
-            style={{ padding:"10px 28px", borderRadius:7, border:"2px solid #4a90d9",
-              background:"#f0f7ff", fontSize:13, color:"#1e5fa0", cursor:"pointer" }}>
+          <button onClick={() => setShowLoadPanel(true)} className="btn-open-primary">
             📂 Open Schedule or Session
           </button>
         </div>
@@ -3572,7 +3508,7 @@ function RequirementGroupEditor({ group, courses, studentTypes, isNew, schoolId,
       </div>
 
       <div className="fl" style={{ gap:8, padding:"12px 20px", borderTop:"1px solid #e0e8f0", flexShrink:0 }}>
-        <button className="btn btn-primary" onClick={save} disabled={saving} style={{ flex:1 }}>
+        <button className="btn btn-primary" onClick={save} disabled={saving} className="flex-1">
           {saving ? "Saving…" : "Save Group"}
         </button>
         <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
@@ -3963,7 +3899,7 @@ function StudentTypeEditor({ typeData, allTypes, allGroups, allCourses, isNew, s
       </div>
 
       <div className="fl" style={{ gap:8, padding:"12px 20px", borderTop:"1px solid #e0e8f0", flexShrink:0 }}>
-        <button className="btn btn-primary" onClick={save} disabled={saving} style={{ flex:1 }}>
+        <button className="btn btn-primary" onClick={save} disabled={saving} className="flex-1">
           {saving ? "Saving…" : "Save Student Type"}
         </button>
         <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
@@ -4113,7 +4049,7 @@ function StudentTypesTab({ schoolId }) {
   const grpCatColor = { core:"#1e3a5f", "required-electives":"#7c3aed", electives:"#0891b2" };
 
   return (
-    <div style={{ display:"flex", height:"calc(100vh - 48px)", overflow:"hidden" }}>
+    <div className="page-fill" style={{ flexDirection:"row" }}>
 
       {/* LEFT: Two-section sidebar */}
       <div style={{ width:268, background:"white", borderRight:"1px solid #e0e8f0",
@@ -4166,7 +4102,7 @@ function StudentTypesTab({ schoolId }) {
                   style={{ padding:"9px 14px", cursor:"pointer",
                     borderLeft:`3px solid ${active ? "#4a90d9" : "transparent"}`,
                     background: active ? "#f0f7ff" : "white", borderBottom:"1px solid #f4f6f8" }}>
-                  <div style={{ fontSize:12, fontWeight:"bold", color:"#1e2a3a" }}>{t.name||t._id}</div>
+                  <div className="text-heading">{t.name||t._id}</div>
                   <div style={{ fontSize:10, color:"#8a9aaa", marginTop:1 }}>
                     {t.extends ? `↑ extends ${t.extends}` : "base type"}{t.immersionLanguage ? ` · ${t.immersionLanguage}` : ""}
                   </div>
@@ -5074,7 +5010,7 @@ function SchoolPage({ schoolId, schoolConfig, onConfigSaved, initialSub, onSubCh
   const sub    = initialSub || "config";
   const setSub = id => onSubChange ? onSubChange(id) : null;
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 48px)" }}>
+    <div className="page-fill">
       <div style={{ display:"flex", background:"white", borderBottom:"1px solid #e0e8f0",
         padding:"0 20px", flexShrink:0 }}>
         {[["config","⚙ Configuration"],["users","👥 Users & Access"]].map(([id,lbl]) => (
@@ -5199,7 +5135,7 @@ function App() {
             </button>
           ))}
         </div>
-        <div style={{ flex:1 }} />
+        <div className="flex-1" />
 
         {/* User avatar / sign-out */}
         <div style={{ position:"relative", flexShrink:0 }}>
@@ -5226,11 +5162,11 @@ function App() {
 
               {/* Identity */}
               <div style={{ padding:"10px 14px", borderBottom:"1px solid #f0f4f8" }}>
-                <div style={{ fontSize:12, fontWeight:"bold", color:"#1e2a3a" }}>
+                <div className="text-heading">
                   {user?.displayName || user?.email}
                 </div>
                 <div style={{ fontSize:10, color:"#8a9aaa" }}>{user?.email}</div>
-                <div style={{ fontSize:10, color:"#8a9aaa", marginTop:2 }}>
+                <div className="text-meta">
                   {userDoc?.role} · {schoolId}
                 </div>
               </div>
@@ -5637,19 +5573,17 @@ function GenerateSchedule({ schoolId, schoolConfig, navigate, dirtyRef }) {
   const gradeEnrollment = schoolConfig?.gradeEnrollment || {};
 
   if (loading) return (
-    <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
-      height:"calc(100vh - 48px)", color:"#8a9aaa", fontSize:13 }}>
+    <div className="flc page-fill" style={{ color:"var(--color-text-light)", fontSize:"var(--text-md)" }}>
       Loading schedule…
     </div>
   );
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 48px)", overflow:"hidden" }}>
+    <div className="page-fill">
 
       {/* ── TOP BAR ── */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 16px",
-        background:"white", borderBottom:"1px solid #e0e8f0", flexShrink:0, flexWrap:"wrap" }}>
-        <div style={{ fontSize:13, fontWeight:"bold", color:"#1e3a5f", flexShrink:0 }}>Schedule Builder</div>
+      <div className="panel-toolbar">
+        <div className="panel-toolbar-title flex-none">Schedule Builder</div>
 
         {/* Semester filter */}
         <div className="fl" style={{ gap:4 }}>
@@ -5677,75 +5611,53 @@ function GenerateSchedule({ schoolId, schoolConfig, navigate, dirtyRef }) {
 
         {/* Save-as inline form */}
         {showSaveAs && (
-          <div className="fl" style={{ gap:5, alignItems:"center", flexShrink:0 }}>
+          <div className="fla flex-none" style={{ gap:"0.3125rem" }}>
             <input autoFocus value={saveAsName} onChange={e => setSaveAsName(e.target.value)}
               onKeyDown={e => { if (e.key==="Enter") confirmSaveAs(); if (e.key==="Escape") setShowSaveAs(false); }}
-              placeholder="Schedule name…"
-              style={{ fontSize:11, padding:"3px 8px", border:"1px solid #c0d0e0",
-                borderRadius:4, width:180, outline:"none" }} />
+              placeholder="Schedule name…" className="save-as-input" />
             <button onClick={confirmSaveAs} disabled={!saveAsName.trim() || saving}
-              className="btn btn-primary" style={{ fontSize:11, padding:"3px 10px" }}>
+              className="btn btn-primary btn-sm">
               {saving ? "…" : "Save"}
             </button>
-            <button onClick={() => setShowSaveAs(false)}
-              style={{ fontSize:11, padding:"3px 8px", background:"none", border:"1px solid #c0d0e0",
-                borderRadius:4, cursor:"pointer", color:"#6b7280" }}>
-              Cancel
-            </button>
+            <button onClick={() => setShowSaveAs(false)} className="btn-cancel-sm">Cancel</button>
           </div>
         )}
 
-        <div style={{ flex:1 }} />
-        {savedMsg && <span style={{ fontSize:11, flexShrink:0,
-          color: savedMsg.startsWith("✓") ? "#15803d" : "#b91c1c" }}>{savedMsg}</span>}
+        <div className="flex-1" />
+        {savedMsg && (
+          <span className={`status-msg flex-none ${savedMsg.startsWith("✓") ? "success" : "error"}`}>
+            {savedMsg}
+          </span>
+        )}
 
-        <button onClick={() => setShowLoadPanel(true)}
-          style={{ fontSize:11, padding:"4px 10px", border:"1px solid #c0d0e0",
-            borderRadius:4, cursor:"pointer", background:"white", color:"#374151", flexShrink:0 }}>
-          📂 Open
-        </button>
+        <button onClick={() => setShowLoadPanel(true)} className="btn-outline flex-none">📂 Open</button>
         <button onClick={() => { setShowSaveAs(true); setSaveAsName(currentSaveName); }}
-          style={{ fontSize:11, padding:"4px 10px", border:"1px solid #c0d0e0",
-            borderRadius:4, cursor:"pointer", background:"white", color:"#374151", flexShrink:0 }}>
-          Save As…
-        </button>
-        <button className="btn btn-primary" style={{ fontSize:11, flexShrink:0 }}
-          onClick={save} disabled={saving}>
+          className="btn-outline flex-none">Save As…</button>
+        <button className="btn btn-primary btn-sm flex-none" onClick={save} disabled={saving}>
           {saving ? "Saving…" : "💾 Save"}
         </button>
       </div>
 
       {/* ── LOAD PANEL ── */}
       {showLoadPanel && (
-        <div style={{ position:"fixed", inset:0, zIndex:100, display:"flex", alignItems:"flex-start",
-          justifyContent:"center", paddingTop:60, background:"rgba(0,0,0,0.35)" }}
-          onClick={() => setShowLoadPanel(false)}>
-          <div style={{ background:"white", borderRadius:8, boxShadow:"0 8px 32px rgba(0,0,0,0.18)",
-            width:480, maxHeight:"70vh", display:"flex", flexDirection:"column", overflow:"hidden" }}
+        <div className="modal-overlay" onClick={() => setShowLoadPanel(false)}>
+          <div className="modal-panel" style={{ width:480, maxHeight:"70vh" }}
             onClick={e => e.stopPropagation()}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-              padding:"12px 16px", borderBottom:"1px solid #e0e8f0" }}>
-              <div style={{ fontSize:13, fontWeight:"bold", color:"#1e3a5f" }}>Saved Schedules</div>
-              <button onClick={() => setShowLoadPanel(false)}
-                style={{ background:"none", border:"none", cursor:"pointer", fontSize:18,
-                  color:"#9ca3af", lineHeight:1 }}>×</button>
+            <div className="modal-header">
+              <div className="modal-title">Saved Schedules</div>
+              <button onClick={() => setShowLoadPanel(false)} className="btn-ghost" style={{ fontSize:"1.125rem" }}>×</button>
             </div>
-            <div style={{ overflowY:"auto", flex:1 }}>
+            <div className="modal-body">
               {/* New blank schedule option */}
-              <div onClick={newSchedule}
-                style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px",
-                  borderBottom:"1px solid #f0f4f8", cursor:"pointer", background:"#f8fafc" }}
-                onMouseEnter={e => e.currentTarget.style.background="#eef3ff"}
-                onMouseLeave={e => e.currentTarget.style.background="#f8fafc"}>
-                <span style={{ fontSize:18 }}>➕</span>
+              <div onClick={newSchedule} className="list-row list-row-new">
+                <span className="list-row-icon" style={{ fontSize:"1.125rem" }}>➕</span>
                 <div>
-                  <div style={{ fontSize:12, fontWeight:"bold", color:"#374151" }}>New blank schedule</div>
-                  <div style={{ fontSize:10, color:"#9ca3af" }}>Start fresh with no placements</div>
+                  <div className="list-row-label" style={{ color:"var(--color-text-secondary)" }}>New blank schedule</div>
+                  <div className="list-row-meta">Start fresh with no placements</div>
                 </div>
               </div>
               {savedSchedules.length === 0 && (
-                <div style={{ padding:"24px 16px", textAlign:"center", fontSize:12,
-                  color:"#9ca3af", fontStyle:"italic" }}>
+                <div className="text-center-muted" style={{ padding:"1.5rem 1rem", fontStyle:"italic" }}>
                   No saved schedules yet.
                 </div>
               )}
@@ -5757,18 +5669,11 @@ function GenerateSchedule({ schoolId, schoolConfig, navigate, dirtyRef }) {
                 const isCurrent = sid === currentSaveId;
                 return (
                   <div key={sid} onClick={() => loadSchedule(s)}
-                    style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 16px",
-                      borderBottom:"1px solid #f0f4f8", cursor:"pointer",
-                      background: isCurrent ? "#eef3ff" : "white" }}
-                    onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background="#f5f8ff"; }}
-                    onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background="white"; }}>
-                    <span style={{ fontSize:18 }}>🗓</span>
+                    className={`list-row${isCurrent ? " is-current" : ""}`}>
+                    <span className="list-row-icon" style={{ fontSize:"1.125rem" }}>🗓</span>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:12, fontWeight:"bold", color:"#1e2a3a",
-                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {name}{isCurrent ? " ✓" : ""}
-                      </div>
-                      <div style={{ fontSize:10, color:"#9ca3af" }}>
+                      <div className="list-row-label">{name}{isCurrent ? " ✓" : ""}</div>
+                      <div className="list-row-meta">
                         {s.semester ? `${s.semester} · ` : ""}
                         {(s.placements||[]).length} placement{(s.placements||[]).length !== 1 ? "s" : ""}
                         {dateStr ? ` · Last saved ${dateStr}` : ""}
@@ -6093,7 +5998,7 @@ function GenerateSchedule({ schoolId, schoolConfig, navigate, dirtyRef }) {
                                       {!isPrep && pl.block === "both" &&
                                         <span style={{ fontSize:8, color:"#5b21b6", fontWeight:"bold",
                                           flexShrink:0 }}>A+B</span>}
-                                      <div style={{ flex:1 }} />
+                                      <div className="flex-1" />
                                       <button onClick={e => { e.stopPropagation(); removePlacement(pl.id); }}
                                         style={{ background:"none", border:"none", cursor:"pointer",
                                           color:"#ef4444", fontSize:12, padding:0, lineHeight:1, flexShrink:0 }}>

@@ -156,6 +156,16 @@ service cloud.firestore {
         allow write: if isStaff(schoolId);
       }
 
+      // ── Validate-schedule sessions ───────────────────────────────────────────
+      // Saved "validate" sessions are named snapshots of a student's course
+      // selections against a generated schedule.  They contain student name and
+      // course choices but no grades, assessments, or other FERPA-sensitive data.
+      // Any active user may read; admin and staff may write.
+      match /validate-sessions/{sessionId} {
+        allow read:  if isActive(schoolId);
+        allow write: if isStaff(schoolId);
+      }
+
       // ── Student records (FERPA) ──────────────────────────────────────────────
       // Restricted to admin and staff only.  Viewers cannot access this subtree.
       match /students/{studentId} {
