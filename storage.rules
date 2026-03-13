@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper: Correct syntax for Storage looking into Firestore
+    function isStaffOfSchool(schoolId) {
+      return request.auth != null && 
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
+    }
+
+    // Helper: Check if user has the admin role in Firestore
+    function isAdmin() {
+      return request.auth != null && 
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // This matches the file path for logos: e.g., /schools/lincoln-middle/logo
+    match /schools/{schoolId}/logo {
+      
+      // PUBLIC: Anyone can see the logo
+      allow read: if true;
+
+      // PROTECTED: Staff of the school OR any Global Admin can upload
+      allow write: if (isStaffOfSchool(schoolId) || isAdmin())
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+  }
+}
